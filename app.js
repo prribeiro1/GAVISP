@@ -67,10 +67,20 @@ async function handleUserSession(session) {
         USER_ROLE = 'super-admin';
         showView('view-super-admin');
         initSuperAdmin();
-    } else if (metadata.role === 'technician' || metadata.role === 'tecnico' || email.startsWith('tecnico@')) {
+    } else if (metadata.role === 'technician' || metadata.role === 'tecnico' || email.startsWith('tecnico@') || email.startsWith('tecnico.')) {
         USER_ROLE = 'technician';
-        PROVIDER_ID = metadata.provider_id || 'linkfire';
-        PROVIDER_DISPLAY_NAME = metadata.provider_name || 'LinkFire';
+        
+        let detectedProviderId = metadata.provider_id || '';
+        if (!detectedProviderId && (email.startsWith('tecnico.') || email.startsWith('tecnico@'))) {
+            // Se for tecnico.provedorid@email.com, extrai o provedorid
+            const prefix = email.split('@')[0];
+            if (prefix.startsWith('tecnico.')) {
+                detectedProviderId = prefix.split('.')[1] || '';
+            }
+        }
+        
+        PROVIDER_ID = detectedProviderId || 'linkfire';
+        PROVIDER_DISPLAY_NAME = metadata.provider_name || (PROVIDER_ID.charAt(0).toUpperCase() + PROVIDER_ID.slice(1));
         
         // Verificar se o provedor está ativo
         const { data: settingsData, error } = await _supabase
@@ -1461,6 +1471,20 @@ async function initTechnicianDashboard(user) {
         }
     }
     
+    // Tentar selecionar placa automaticamente se não houver no localStorage
+    if (!selectedTechPlate && user) {
+        const userPlate = user.user_metadata?.plate || user.user_metadata?.placa;
+        if (userPlate) {
+            selectedTechPlate = userPlate.toUpperCase();
+        } else {
+            const userName = user.user_metadata?.name || user.user_metadata?.full_name || '';
+            const matchingVehicle = state.vehicles.find(v => v.name.toLowerCase() === userName.toLowerCase());
+            if (matchingVehicle) {
+                selectedTechPlate = matchingVehicle.plate;
+            }
+        }
+    }
+    
     // Setup plate dropdown selector
     const plateSelect = document.getElementById('tech-plate-select');
     if (plateSelect) {
@@ -1500,6 +1524,18 @@ async function renderTechnicianDashboard() {
     const listEl = document.getElementById('tech-schedules-list');
     if (!listEl) return;
     listEl.innerHTML = '';
+    
+    // Atualizar subheader dinamicamente
+    let subText = PROVIDER_DISPLAY_NAME;
+    if (selectedTechPlate) {
+        const vInfo = state.vehicles.find(v => v.plate === selectedTechPlate);
+        if (vInfo) {
+            subText += ` — ${vInfo.name} (${selectedTechPlate})`;
+        } else {
+            subText += ` — ${selectedTechPlate}`;
+        }
+    }
+    document.getElementById('tech-header-sub').textContent = subText;
     
     if (!selectedTechPlate) {
         listEl.innerHTML = `
