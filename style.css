@@ -1347,3 +1347,64 @@ body {
     color: var(--status-red);
 }
 
+/* Responsive mobile header and layout adjustments */
+@media (max-width: 600px) {
+    .header-container {
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 12px !important;
+        padding: 10px 0 !important;
+    }
+    .brand {
+        justify-content: center !important;
+    }
+    .header-stats {
+        justify-content: center !important;
+    }
+    .header-actions {
+        justify-content: center !important;
+        width: 100% !important;
+        gap: 10px !important;
+    }
+    .header-actions .btn {
+        flex: 1 !important;
+        font-size: 0.8rem !important;
+        padding: 8px 12px !important;
+    }
+    .app-header {
+        padding: 10px 15px !important;
+    }
+    .app-main {
+        padding: 12px !important;
+        gap: 12px !important;
+    }
+    .days-slider-container {
+        padding: 4px !important;
+    }
+    .day-tab {
+        min-width: 60px !important;
+        padding: 6px 4px !important;
+    }
+    .day-tab .day-num {
+        font-size: 1.1rem !important;
+    }
+    .current-day-banner {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 8px !important;
+        padding: 4px !important;
+    }
+    .current-day-banner h2 {
+        font-size: 1.1rem !important;
+    }
+    .shift-header {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 10px !important;
+    }
+    .shift-capacity-control {
+        width: 100% !important;
+        justify-content: space-between !important;
+    }
+}
+

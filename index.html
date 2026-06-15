@@ -248,33 +248,6 @@
                 <div class="provider-list-group" id="admin-provider-list" style="margin-bottom: 20px;">
                     <!-- Hydrated by JS -->
                 </div>
-                
-                <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 20px 0;">
-                
-                <h3>Cadastrar Novo Provedor</h3>
-                <form id="form-admin-create-provider" style="margin-top: 15px; display: flex; flex-direction: column; gap: 12px;">
-                    <div class="form-group" style="margin-bottom: 0;">
-                        <label for="new-prov-id">ID do Provedor (Minúsculo, sem espaços)</label>
-                        <input type="text" id="new-prov-id" placeholder="Ex: ispteste" required style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: var(--border-radius-sm);">
-                    </div>
-                    <div class="form-group" style="margin-bottom: 0;">
-                        <label for="new-prov-name">Nome Comercial</label>
-                        <input type="text" id="new-prov-name" placeholder="Ex: ISP Teste" required style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: var(--border-radius-sm);">
-                    </div>
-                    <div class="form-row" style="margin-bottom: 0; display: flex; gap: 8px;">
-                        <div class="form-group col-6" style="flex: 1; margin-bottom: 0;">
-                            <label for="new-prov-lat">Latitude Sede</label>
-                            <input type="number" id="new-prov-lat" step="any" value="-1.3780" required style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: var(--border-radius-sm);">
-                        </div>
-                        <div class="form-group col-6" style="flex: 1; margin-bottom: 0;">
-                            <label for="new-prov-lng">Longitude Sede</label>
-                            <input type="number" id="new-prov-lng" step="any" value="-48.3720" required style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: var(--border-radius-sm);">
-                        </div>
-                    </div>
-                    <button type="submit" class="btn btn-accent w-full" style="padding: 10px;">
-                        <i data-lucide="plus-circle"></i> Criar Provedor
-                    </button>
-                </form>
             </div>
             
             <div class="admin-content-area">
@@ -292,9 +265,14 @@
                 <div class="backup-explorer" id="admin-backup-explorer" style="display: none; margin-top: 20px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 15px; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
                         <h3 id="admin-selected-provider-title" style="margin: 0;">Painel do Cliente</h3>
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <span style="font-size: 0.9rem; font-weight: 600;">Status do Cliente:</span>
-                            <button id="btn-admin-toggle-status" class="btn btn-secondary" style="padding: 6px 12px; font-size: 0.85rem; font-weight: 700;"></button>
+                        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span style="font-size: 0.9rem; font-weight: 600;">Status:</span>
+                                <button id="btn-admin-toggle-status" class="btn btn-secondary" style="padding: 6px 12px; font-size: 0.85rem; font-weight: 700;"></button>
+                            </div>
+                            <button id="btn-admin-delete-provider" class="btn btn-logout" style="padding: 6px 12px; font-size: 0.85rem; font-weight: 700; border: 1px solid #FFCDD2; border-radius: var(--border-radius-md); display: inline-flex; align-items: center; gap: 6px;">
+                                <i data-lucide="trash-2"></i> Excluir permanentemente
+                            </button>
                         </div>
                     </div>
 

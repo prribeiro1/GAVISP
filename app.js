@@ -978,7 +978,12 @@ function setupClientEventListeners() {
     document.getElementById('btn-add-status').onclick = addStatus;
     document.getElementById('btn-save-settings').onclick = saveSettings;
     document.getElementById('form-schedule').onsubmit = saveSchedule;
-    document.getElementById('btn-export-csv').onclick = exportSchedulesToCSV;
+    
+    const exportBtn = document.getElementById('btn-export-csv');
+    if (exportBtn) {
+        exportBtn.onclick = exportSchedulesToCSV;
+    }
+    
     document.getElementById('loc-type-link').onchange = toggleLocFields;
     document.getElementById('loc-type-address').onchange = toggleLocFields;
     
@@ -1049,59 +1054,6 @@ async function initSuperAdmin() {
         listContainer.appendChild(item);
     });
 
-    // Configurar envio do formulário de criação de provedor (se ainda não configurado)
-    const formCreate = document.getElementById('form-admin-create-provider');
-    formCreate.onsubmit = async (e) => {
-        e.preventDefault();
-        const provId = document.getElementById('new-prov-id').value.trim().toLowerCase();
-        const provName = document.getElementById('new-prov-name').value.trim();
-        const lat = parseFloat(document.getElementById('new-prov-lat').value) || -1.3780;
-        const lng = parseFloat(document.getElementById('new-prov-lng').value) || -48.3720;
-        
-        if (!provId || !provName) {
-            alert('Preencha os campos obrigatórios.');
-            return;
-        }
-        
-        const payload = {
-            defaultMorning: 5,
-            defaultAfternoon: 5,
-            reasons: [
-                'Sem conexão',
-                'Lentidão',
-                'LED LOS vermelho',
-                'Troca de equipamento',
-                'Rompimento de cabo',
-                'Instalação',
-                'Manutenção preventiva'
-            ],
-            statuses: [
-                { name: 'Confirmado', color: '#2e7d32' },
-                { name: 'Em contato', color: '#0288d1' },
-                { name: 'Agendado/Sem confirmação', color: '#ed6c02' },
-                { name: 'Reagendar', color: '#8e24aa' },
-                { name: 'Realizado', color: '#4caf50' },
-                { name: 'Cancelado', color: '#d32f2f' }
-            ],
-            retentionDays: 0,
-            hqName: provName,
-            hqLat: lat,
-            hqLng: lng,
-            active: true
-        };
-        
-        const { error } = await _supabase
-            .from('settings')
-            .upsert({ provider_id: provId, value: payload }, { onConflict: 'provider_id' });
-            
-        if (error) {
-            alert('Erro ao criar provedor: ' + error.message);
-        } else {
-            alert(`Provedor "${provName}" criado com sucesso!`);
-            formCreate.reset();
-            await initSuperAdmin();
-        }
-    };
     lucide.createIcons();
 }
 
@@ -1139,6 +1091,25 @@ async function selectAdminProvider(providerId, providerName, isActive, val) {
             alert(`Cliente ${nextActive ? 'ativado' : 'desativado'} com sucesso!`);
             await initSuperAdmin();
             await selectAdminProvider(providerId, providerName, nextActive, newVal);
+        }
+    };
+
+    // Configurar botão de exclusão permanente do cliente e todos os seus dados
+    const deleteBtn = document.getElementById('btn-admin-delete-provider');
+    deleteBtn.onclick = async () => {
+        if (confirm(`ATENÇÃO! Tem certeza de que deseja excluir permanentemente o cliente "${providerName}"?\n\nIsso apagará TODOS os agendamentos, capacidades de vagas, dados de sede e configurações desse cliente no banco de dados. Esta ação não pode ser desfeita.`)) {
+            const { error: delSchedsErr } = await _supabase.from('schedules').delete().eq('provider_id', providerId);
+            const { error: delCapacitiesErr } = await _supabase.from('capacities').delete().eq('provider_id', providerId);
+            const { error: delSettingsErr } = await _supabase.from('settings').delete().eq('provider_id', providerId);
+            
+            if (delSchedsErr || delCapacitiesErr || delSettingsErr) {
+                alert('Erro ao deletar alguns dados do cliente: ' + (delSettingsErr?.message || delSchedsErr?.message || delCapacitiesErr?.message));
+            } else {
+                alert(`O cliente "${providerName}" e todos os seus dados foram apagados permanentemente do sistema.`);
+                document.getElementById('admin-backup-explorer').style.display = 'none';
+                document.getElementById('admin-no-selection').style.display = 'block';
+                await initSuperAdmin();
+            }
         }
     };
     
