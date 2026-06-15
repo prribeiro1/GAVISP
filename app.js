@@ -34,8 +34,7 @@ let state = {
     retentionDays: 0,
     hqName: '',
     hqLat: -1.3780,
-    hqLng: -48.3720,
-    logo: ''
+    hqLng: -48.3720
 };
 
 let activeDate = '';
@@ -169,7 +168,6 @@ async function loadSettings() {
         state.hqName = data.value.hqName || '';
         state.hqLat = data.value.hqLat || state.hqLat;
         state.hqLng = data.value.hqLng || state.hqLng;
-        state.logo = data.value.logo || '';
         
         renderHeaderLogo();
         
@@ -185,16 +183,12 @@ async function loadSettings() {
 
 function renderHeaderLogo() {
     const brandContainer = document.getElementById('brand-logo-container');
-    if (state.logo) {
-        brandContainer.innerHTML = `<img src="${state.logo}" alt="${PROVIDER_DISPLAY_NAME}" style="max-height: 46px; max-width: 180px; object-fit: contain;">`;
-    } else {
-        brandContainer.innerHTML = `
-            <div class="brand-text">
-                <h1 id="header-brand-name">${PROVIDER_DISPLAY_NAME}</h1>
-                <span class="brand-sub">Fibra Óptica</span>
-            </div>
-        `;
-    }
+    brandContainer.innerHTML = `
+        <div class="brand-text">
+            <h1 id="header-brand-name">${PROVIDER_DISPLAY_NAME}</h1>
+            <span class="brand-sub">Fibra Óptica</span>
+        </div>
+    `;
 }
 
 async function loadSchedules() {
@@ -392,7 +386,19 @@ function exportSchedulesToCSV() {
     document.body.removeChild(link);
 }
 
-// --- Client UI Rendering ---
+// --- Toggle Form Location Fields ---
+window.toggleLocFields = function() {
+    const isLink = document.getElementById('loc-type-link').checked;
+    if (isLink) {
+        document.getElementById('loc-link-group').style.display = 'block';
+        document.getElementById('loc-address-group').style.display = 'none';
+    } else {
+        document.getElementById('loc-link-group').style.display = 'none';
+        document.getElementById('loc-address-group').style.display = 'block';
+    }
+};
+
+// --- Render Operations ---
 function renderAll() {
     renderStats();
     renderDaysSlider();
@@ -784,15 +790,6 @@ function openSettingsModal() {
     document.getElementById('settings-hq-lat').value = state.hqLat;
     document.getElementById('settings-hq-lng').value = state.hqLng;
     
-    // Manage Logo Preview inside Settings Modal
-    const logoPreviewContainer = document.getElementById('settings-logo-preview-container');
-    if (state.logo) {
-        document.getElementById('settings-logo-preview').src = state.logo;
-        logoPreviewContainer.style.display = 'block';
-    } else {
-        logoPreviewContainer.style.display = 'none';
-    }
-    
     renderSettingsReasons();
     renderSettingsStatuses();
     settingsModal.classList.add('open');
@@ -871,8 +868,7 @@ async function saveSettingsToDb() {
         retentionDays: state.retentionDays,
         hqName: state.hqName,
         hqLat: state.hqLat,
-        hqLng: state.hqLng,
-        logo: state.logo
+        hqLng: state.hqLng
     };
     await _supabase.from('settings').upsert({ provider_id: PROVIDER_ID, value: payload }, { onConflict: 'provider_id' });
 }
@@ -881,6 +877,7 @@ function setupClientEventListeners() {
     document.querySelectorAll('.btn-cap-adjust').forEach(btn => {
         btn.onclick = () => { adjustCapacity(btn.dataset.shift, btn.classList.contains('inc') ? 'inc' : 'dec'); };
     });
+    
     document.querySelectorAll('.filter-btn').forEach(btn => {
         btn.onclick = () => {
             const shift = btn.dataset.shift;
@@ -891,7 +888,7 @@ function setupClientEventListeners() {
         };
     });
     
-    // Target the specific dynamic buttons in app grids
+    // Bind click to dynamic buttons using delegated-like direct loops, but ensure it works on re-renders by calling setupClientEventListeners
     document.querySelectorAll('.btn-add-schedule').forEach(btn => {
         btn.onclick = () => { openAddModal(btn.dataset.shift); };
     });
@@ -918,7 +915,6 @@ function setupClientEventListeners() {
     document.getElementById('loc-type-link').onchange = toggleLocFields;
     document.getElementById('loc-type-address').onchange = toggleLocFields;
     
-    // GPS location fetcher
     document.getElementById('btn-hq-current-location').onclick = () => {
         if (!navigator.geolocation) {
             alert('Geolocalização não suportada no seu navegador.');
@@ -936,27 +932,6 @@ function setupClientEventListeners() {
             },
             { enableHighAccuracy: true }
         );
-    };
-    
-    // Logo Upload Reader
-    document.getElementById('settings-logo-upload').onchange = (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                state.logo = event.target.result; // Base64
-                document.getElementById('settings-logo-preview').src = state.logo;
-                document.getElementById('settings-logo-preview-container').style.display = 'block';
-            };
-            reader.readAsDataURL(file);
-        }
-    };
-    
-    // Logo Remover
-    document.getElementById('btn-remove-logo').onclick = () => {
-        state.logo = '';
-        document.getElementById('settings-logo-upload').value = '';
-        document.getElementById('settings-logo-preview-container').style.display = 'none';
     };
     
     document.getElementById('slider-prev').onclick = () => { document.getElementById('days-nav-container').scrollLeft -= 150; };
