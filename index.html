@@ -44,6 +44,34 @@
         </div>
     </section>
 
+    <!-- ================= VIEW 1.5: INACTIVE BLOCK ================= -->
+    <section id="view-inactive" class="auth-container" style="display: none; justify-content: center; align-items: center;">
+        <div class="auth-card" style="text-align: center; max-width: 450px; padding: 40px 30px;">
+            <div class="auth-header">
+                <span class="auth-logo" style="font-size: 3.5rem; display: inline-block; margin-bottom: 10px;">⚠️</span>
+                <h2 style="color: var(--status-red); margin-top: 15px; font-weight: 800;">Acesso Suspenso</h2>
+                <p style="margin: 20px 0; font-size: 0.95rem; color: var(--text-secondary); line-height: 1.6;">
+                    Esta conta de provedor encontra-se temporariamente inativa na plataforma GAVISP por falta de pagamento ou pendências cadastrais.
+                </p>
+                <p style="margin-bottom: 30px; font-size: 0.9rem; font-weight: 600; color: var(--text-primary);">
+                    Por favor, entre em contato com o administrador para reativar seu acesso.
+                </p>
+            </div>
+            
+            <a href="https://wa.me/5522999298128?text=Olá!%20Gostaria%20de%20reativar%20minha%20conta%20no%20GAVISP" 
+               target="_blank" class="btn w-full" style="background-color: #25D366; color: white; display: inline-flex; align-items: center; justify-content: center; gap: 10px; font-size: 1rem; padding: 14px; border-radius: var(--border-radius-md); text-decoration: none; font-weight: 700; margin-bottom: 15px;">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 24 24" style="vertical-align: middle;">
+                    <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.06 5.348 5.397.01 12.008.01c3.202.001 6.212 1.246 8.477 3.514 2.266 2.268 3.507 5.28 3.505 8.484-.004 6.657-5.34 11.997-11.953 11.997-2.005-.001-3.973-.502-5.724-1.455L0 24zm6.59-4.846c1.6.95 3.188 1.449 4.825 1.451 5.436 0 9.86-4.37 9.864-9.799.002-2.63-1.023-5.101-2.885-6.97C16.69 1.967 14.22 .94 11.59 1.94c-5.442 0-9.868 4.37-9.872 9.799-.001 1.77.476 3.498 1.38 5.031L2.085 21.8l5.09-1.328-.528-.318zm11.332-6.52c-.297-.15-1.758-.867-2.03-.967-.273-.099-.471-.15-.669.15-.198.299-.769.967-.941 1.165-.173.199-.347.223-.644.074-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.568-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
+                </svg>
+                Falar com Suporte (WhatsApp)
+            </a>
+            
+            <button id="btn-back-login" class="btn btn-secondary w-full">
+                Voltar para a Tela de Login
+            </button>
+        </div>
+    </section>
+
     <!-- ================= VIEW 2: CLIENT DASHBOARD ================= -->
     <section id="view-client-dashboard" style="display: none;">
         <header class="app-header">
@@ -67,10 +95,6 @@
                 </div>
 
                 <div class="header-actions">
-                    <button id="btn-export-csv" class="btn btn-secondary" title="Exportar para Excel/CSV">
-                        <i data-lucide="download"></i>
-                        Exportar
-                    </button>
                     <button id="btn-open-settings" class="btn btn-secondary">
                         <i data-lucide="settings"></i>
                         Configurações
@@ -220,10 +244,37 @@
         <main class="app-main admin-layout">
             <div class="admin-sidebar">
                 <h3>Clientes (Provedores)</h3>
-                <p class="section-desc">Selecione uma empresa para inspecionar e acessar backups em CSV.</p>
-                <div class="provider-list-group" id="admin-provider-list">
+                <p class="section-desc">Selecione uma empresa para gerenciar e exportar relatórios.</p>
+                <div class="provider-list-group" id="admin-provider-list" style="margin-bottom: 20px;">
                     <!-- Hydrated by JS -->
                 </div>
+                
+                <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 20px 0;">
+                
+                <h3>Cadastrar Novo Provedor</h3>
+                <form id="form-admin-create-provider" style="margin-top: 15px; display: flex; flex-direction: column; gap: 12px;">
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label for="new-prov-id">ID do Provedor (Minúsculo, sem espaços)</label>
+                        <input type="text" id="new-prov-id" placeholder="Ex: ispteste" required style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: var(--border-radius-sm);">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label for="new-prov-name">Nome Comercial</label>
+                        <input type="text" id="new-prov-name" placeholder="Ex: ISP Teste" required style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: var(--border-radius-sm);">
+                    </div>
+                    <div class="form-row" style="margin-bottom: 0; display: flex; gap: 8px;">
+                        <div class="form-group col-6" style="flex: 1; margin-bottom: 0;">
+                            <label for="new-prov-lat">Latitude Sede</label>
+                            <input type="number" id="new-prov-lat" step="any" value="-1.3780" required style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: var(--border-radius-sm);">
+                        </div>
+                        <div class="form-group col-6" style="flex: 1; margin-bottom: 0;">
+                            <label for="new-prov-lng">Longitude Sede</label>
+                            <input type="number" id="new-prov-lng" step="any" value="-48.3720" required style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: var(--border-radius-sm);">
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-accent w-full" style="padding: 10px;">
+                        <i data-lucide="plus-circle"></i> Criar Provedor
+                    </button>
+                </form>
             </div>
             
             <div class="admin-content-area">
@@ -239,17 +290,46 @@
                 </div>
 
                 <div class="backup-explorer" id="admin-backup-explorer" style="display: none; margin-top: 20px;">
-                    <h3 id="admin-selected-provider-title">Backups do Cliente</h3>
-                    <p class="section-desc">Lista de arquivos históricos CSV gerados automaticamente pelas rotinas de limpeza.</p>
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 15px; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
+                        <h3 id="admin-selected-provider-title" style="margin: 0;">Painel do Cliente</h3>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 0.9rem; font-weight: 600;">Status do Cliente:</span>
+                            <button id="btn-admin-toggle-status" class="btn btn-secondary" style="padding: 6px 12px; font-size: 0.85rem; font-weight: 700;"></button>
+                        </div>
+                    </div>
+
+                    <div style="background: var(--surface); border: 1px solid var(--border-color); border-radius: var(--border-radius-md); padding: 24px; margin-bottom: 20px;">
+                        <h4 style="margin-bottom: 8px;">Exportar Relatório por Período</h4>
+                        <p class="section-desc">Selecione as datas inicial e final para filtrar os agendamentos realizados e baixar o arquivo CSV.</p>
+                        
+                        <div style="display: flex; gap: 15px; flex-wrap: wrap; margin-top: 20px; align-items: flex-end;">
+                            <div style="flex: 1; min-width: 140px;">
+                                <label for="admin-export-start" style="font-size: 0.8rem; font-weight: 700; text-transform: uppercase; color: var(--text-secondary); display: block; margin-bottom: 6px;">Data Inicial</label>
+                                <input type="date" id="admin-export-start" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--border-radius-md); font-family: inherit;">
+                            </div>
+                            <div style="flex: 1; min-width: 140px;">
+                                <label for="admin-export-end" style="font-size: 0.8rem; font-weight: 700; text-transform: uppercase; color: var(--text-secondary); display: block; margin-bottom: 6px;">Data Final</label>
+                                <input type="date" id="admin-export-end" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--border-radius-md); font-family: inherit;">
+                            </div>
+                            <button id="btn-admin-generate-csv" class="btn btn-primary" style="height: 42px; display: inline-flex; align-items: center; gap: 8px;">
+                                <i data-lucide="download"></i>
+                                Baixar Arquivo CSV
+                            </button>
+                        </div>
+                    </div>
                     
-                    <ul class="settings-list-items" id="admin-backup-list" style="max-height: 400px; margin-top: 15px;">
-                        <!-- Hydrated by JS -->
-                    </ul>
+                    <div style="background: var(--surface); border: 1px solid var(--border-color); border-radius: var(--border-radius-md); padding: 24px;">
+                        <h4 style="margin-bottom: 8px;">Backups Automáticos Antigos (Purges)</h4>
+                        <p class="section-desc">Histórico de arquivos CSV arquivados automaticamente pelas políticas de expiração do cliente.</p>
+                        <ul class="settings-list-items" id="admin-backup-list" style="max-height: 250px; overflow-y: auto; margin-top: 15px;">
+                            <!-- Hydrated by JS -->
+                        </ul>
+                    </div>
                 </div>
 
                 <div id="admin-no-selection" class="empty-state" style="text-align: center; padding: 60px; color: var(--text-secondary);">
                     <i data-lucide="info" style="width: 48px; height: 48px; margin-bottom: 12px; color: var(--primary);"></i>
-                    <p>Selecione um cliente no menu lateral para visualizar seus arquivos de backup.</p>
+                    <p>Selecione um cliente no menu lateral para visualizar os controles e arquivos de backup.</p>
                 </div>
             </div>
         </main>

@@ -50,15 +50,15 @@ let shiftFilters = {
 let adminSelectedProvider = '';
 
 // --- Auth Observers ---
-_supabase.auth.onAuthStateChange((event, session) => {
+_supabase.auth.onAuthStateChange(async (event, session) => {
     if (session) {
-        handleUserSession(session);
+        await handleUserSession(session);
     } else {
         showView('view-login');
     }
 });
 
-function handleUserSession(session) {
+async function handleUserSession(session) {
     const email = session.user.email;
     const metadata = session.user.user_metadata || {};
     
@@ -71,6 +71,18 @@ function handleUserSession(session) {
         PROVIDER_ID = metadata.provider_id || 'linkfire';
         PROVIDER_DISPLAY_NAME = metadata.provider_name || 'LinkFire';
         
+        // Verificar se o provedor está ativo
+        const { data: settingsData, error } = await _supabase
+            .from('settings')
+            .select('value')
+            .eq('provider_id', PROVIDER_ID)
+            .maybeSingle();
+            
+        if (!error && settingsData && settingsData.value && settingsData.value.active === false) {
+            showView('view-inactive');
+            return;
+        }
+        
         showView('view-client-dashboard');
         initClientDashboard();
     }
@@ -78,10 +90,11 @@ function handleUserSession(session) {
 
 function showView(viewId) {
     document.getElementById('view-login').style.display = 'none';
+    document.getElementById('view-inactive').style.display = 'none';
     document.getElementById('view-client-dashboard').style.display = 'none';
     document.getElementById('view-super-admin').style.display = 'none';
     
-    document.getElementById(viewId).style.display = viewId === 'view-login' ? 'flex' : 'block';
+    document.getElementById(viewId).style.display = (viewId === 'view-login' || viewId === 'view-inactive') ? 'flex' : 'block';
 }
 
 // --- App Initialization ---
@@ -103,6 +116,7 @@ function setupAuthEventListeners() {
     
     document.getElementById('btn-logout-client').onclick = () => _supabase.auth.signOut();
     document.getElementById('btn-logout-admin').onclick = () => _supabase.auth.signOut();
+    document.getElementById('btn-back-login').onclick = () => _supabase.auth.signOut();
 }
 
 // --- Client Dashboard Logic ---
@@ -963,32 +977,139 @@ async function initSuperAdmin() {
         const item = document.createElement('div');
         item.className = 'provider-item';
         const name = (p.value && p.value.hqName) || p.provider_id;
+        const isActive = p.value && p.value.active !== false;
         
         item.innerHTML = `
             <div>
                 <h5>${name}</h5>
                 <span class="sub">${p.provider_id}</span>
             </div>
-            <span class="badge-active-status active">Ativo</span>
+            <span class="badge-active-status ${isActive ? 'active' : 'inactive'}">${isActive ? 'Ativo' : 'Inativo'}</span>
         `;
         
         item.onclick = () => {
             document.querySelectorAll('.provider-item').forEach(el => el.classList.remove('active'));
             item.classList.add('active');
-            selectAdminProvider(p.provider_id, name);
+            selectAdminProvider(p.provider_id, name, isActive, p.value);
         };
         
         listContainer.appendChild(item);
     });
+
+    // Configurar envio do formulário de criação de provedor (se ainda não configurado)
+    const formCreate = document.getElementById('form-admin-create-provider');
+    formCreate.onsubmit = async (e) => {
+        e.preventDefault();
+        const provId = document.getElementById('new-prov-id').value.trim().toLowerCase();
+        const provName = document.getElementById('new-prov-name').value.trim();
+        const lat = parseFloat(document.getElementById('new-prov-lat').value) || -1.3780;
+        const lng = parseFloat(document.getElementById('new-prov-lng').value) || -48.3720;
+        
+        if (!provId || !provName) {
+            alert('Preencha os campos obrigatórios.');
+            return;
+        }
+        
+        const payload = {
+            defaultMorning: 5,
+            defaultAfternoon: 5,
+            reasons: [
+                'Sem conexão',
+                'Lentidão',
+                'LED LOS vermelho',
+                'Troca de equipamento',
+                'Rompimento de cabo',
+                'Instalação',
+                'Manutenção preventiva'
+            ],
+            statuses: [
+                { name: 'Confirmado', color: '#2e7d32' },
+                { name: 'Em contato', color: '#0288d1' },
+                { name: 'Agendado/Sem confirmação', color: '#ed6c02' },
+                { name: 'Reagendar', color: '#8e24aa' },
+                { name: 'Realizado', color: '#4caf50' },
+                { name: 'Cancelado', color: '#d32f2f' }
+            ],
+            retentionDays: 0,
+            hqName: provName,
+            hqLat: lat,
+            hqLng: lng,
+            active: true
+        };
+        
+        const { error } = await _supabase
+            .from('settings')
+            .upsert({ provider_id: provId, value: payload }, { onConflict: 'provider_id' });
+            
+        if (error) {
+            alert('Erro ao criar provedor: ' + error.message);
+        } else {
+            alert(`Provedor "${provName}" criado com sucesso!`);
+            formCreate.reset();
+            await initSuperAdmin();
+        }
+    };
+    lucide.createIcons();
 }
 
-async function selectAdminProvider(providerId, providerName) {
+async function selectAdminProvider(providerId, providerName, isActive, val) {
     adminSelectedProvider = providerId;
     
     document.getElementById('admin-no-selection').style.display = 'none';
     document.getElementById('admin-backup-explorer').style.display = 'block';
-    document.getElementById('admin-selected-provider-title').textContent = `Backups — ${providerName}`;
+    document.getElementById('admin-selected-provider-title').textContent = `Painel — ${providerName}`;
     
+    // Status button toggle UI
+    const statusBtn = document.getElementById('btn-admin-toggle-status');
+    if (isActive) {
+        statusBtn.textContent = 'Desativar Cliente';
+        statusBtn.style.backgroundColor = 'var(--status-red-bg)';
+        statusBtn.style.color = 'var(--status-red)';
+        statusBtn.style.borderColor = '#FFCDD2';
+    } else {
+        statusBtn.textContent = 'Ativar Cliente';
+        statusBtn.style.backgroundColor = 'var(--status-green-bg)';
+        statusBtn.style.color = 'var(--status-green)';
+        statusBtn.style.borderColor = '#C8E6C9';
+    }
+    
+    statusBtn.onclick = async () => {
+        const nextActive = !isActive;
+        const newVal = { ...val, active: nextActive };
+        const { error } = await _supabase
+            .from('settings')
+            .upsert({ provider_id: providerId, value: newVal }, { onConflict: 'provider_id' });
+            
+        if (error) {
+            alert('Erro ao atualizar status: ' + error.message);
+        } else {
+            alert(`Cliente ${nextActive ? 'ativado' : 'desativado'} com sucesso!`);
+            await initSuperAdmin();
+            await selectAdminProvider(providerId, providerName, nextActive, newVal);
+        }
+    };
+    
+    // Setup export tool date inputs default values
+    const today = new Date();
+    const formattedToday = getFormattedDate(today);
+    document.getElementById('admin-export-end').value = formattedToday;
+    
+    const oneMonthAgo = new Date();
+    oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+    document.getElementById('admin-export-start').value = getFormattedDate(oneMonthAgo);
+    
+    // Setup Generate CSV handler
+    document.getElementById('btn-admin-generate-csv').onclick = async () => {
+        const start = document.getElementById('admin-export-start').value;
+        const end = document.getElementById('admin-export-end').value;
+        if (!start || !end) {
+            alert('Por favor, selecione as datas inicial e final.');
+            return;
+        }
+        await downloadCustomRangeCSV(providerId, providerName, start, end);
+    };
+    
+    // Hydrate automatic backups
     const { data: files, error } = await _supabase
         .storage
         .from('backups')
@@ -998,7 +1119,7 @@ async function selectAdminProvider(providerId, providerName) {
     listContainer.innerHTML = '';
     
     if (error || !files || files.length === 0) {
-        listContainer.innerHTML = `<div style="text-align:center; padding:20px; font-style:italic; color:var(--text-secondary);">Nenhum arquivo de backup encontrado no storage</div>`;
+        listContainer.innerHTML = `<div style="text-align:center; padding:20px; font-style:italic; color:var(--text-secondary);">Nenhum arquivo de backup automático encontrado</div>`;
         return;
     }
     
@@ -1016,6 +1137,52 @@ async function selectAdminProvider(providerId, providerName) {
         listContainer.appendChild(li);
     });
     lucide.createIcons();
+}
+
+async function downloadCustomRangeCSV(providerId, providerName, startDate, endDate) {
+    const { data, error } = await _supabase
+        .from('schedules')
+        .select('*')
+        .eq('provider_id', providerId)
+        .gte('date_str', startDate)
+        .lte('date_str', endDate);
+        
+    if (error) {
+        alert('Erro ao buscar dados para exportação: ' + error.message);
+        return;
+    }
+    
+    if (!data || data.length === 0) {
+        alert('Nenhum agendamento encontrado no período selecionado.');
+        return;
+    }
+    
+    let csvText = '\uFEFF';
+    csvText += 'Protocolo;Data;Turno;Cliente;Telefone;Veículo;Motivo;Status;Link Localização;Observações\n';
+    data.forEach(s => {
+        const row = [
+            s.protocol,
+            s.date_str,
+            s.shift === 'morning' ? 'Manhã' : 'Tarde',
+            s.name.replace(/;/g, ','),
+            s.phone.replace(/;/g, ','),
+            s.vehicle === 'car' ? 'Carro' : 'Moto',
+            s.reason.replace(/;/g, ','),
+            s.status,
+            s.map_link || '',
+            (s.notes || '').replace(/;/g, ',').replace(/\n/g, ' ')
+        ];
+        csvText += row.join(';') + '\n';
+    });
+    
+    const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `relatorio_${providerId}_${startDate}_a_${endDate}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 }
 
 async function downloadAdminBackup(providerId, fileName) {

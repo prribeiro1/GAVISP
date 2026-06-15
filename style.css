@@ -1332,3 +1332,18 @@ body {
     border-color: #FFCDD2 !important;
 }
 
+/* Responsive admin layout adjustments */
+@media (max-width: 768px) {
+    .admin-layout {
+        flex-direction: column !important;
+    }
+    .admin-sidebar {
+        width: 100% !important;
+    }
+}
+
+.badge-active-status.inactive {
+    background-color: var(--status-red-bg);
+    color: var(--status-red);
+}
+
