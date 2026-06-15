@@ -152,95 +152,40 @@ function closeRouteModal() {
 function calculateAndRenderRoute(shift) {
     // Reset Map Layers
     markersGroup.clearLayers();
-    if (routePolyline) {
-        leafletMap.removeLayer(routePolyline);
-        routePolyline = null;
-    }
     
+    // Remove existing polylines
+    if (window.routePolylines && window.routePolylines.length > 0) {
+        window.routePolylines.forEach(p => leafletMap.removeLayer(p));
+    }
+    window.routePolylines = [];
+
     const daySchedules = state.schedules.filter(s => s.dateStr === activeDate && s.shift === shift);
     
-    // Sort schedules with coordinates
-    let locPoints = [];
-    let unlocatedSchedules = [];
-    
-    daySchedules.forEach((s, idx) => {
-        if (s.mapLink) {
-            const coords = parseMapLink(s.mapLink, idx);
-            if (coords) {
-                locPoints.push({
-                    ...coords,
-                    scheduleId: s.id,
-                    name: s.name,
-                    protocol: s.protocol,
-                    reason: s.reason,
-                    notes: s.notes || 'Sem observações'
-                });
-                return;
-            }
-        }
-        unlocatedSchedules.push(s);
+    // Group schedules by vehicle (plate)
+    let grouped = {};
+    daySchedules.forEach(s => {
+        const vPlate = s.vehicle || 'sem-veiculo';
+        if (!grouped[vPlate]) grouped[vPlate] = [];
+        grouped[vPlate].push(s);
     });
+
+    // Populate route stats
+    let totalVisits = daySchedules.length;
+    let locatedVisitsCount = 0;
     
-    // Calculate TSP
-    const optimizedPoints = optimizeRouteSequence(locPoints);
-    activeRoutePoints = optimizedPoints;
+    // Summary Container
+    const summaryContainer = document.getElementById('route-vehicles-summary');
+    summaryContainer.innerHTML = '';
     
-    // Update Stats UI
-    document.getElementById('route-total-visits').textContent = daySchedules.length;
-    document.getElementById('route-located-visits').textContent = optimizedPoints.length;
-    document.getElementById('modal-route-title').textContent = `Roteirização — Turno da ${shift === 'morning' ? 'Manhã' : 'Tarde'}`;
-    document.getElementById('modal-route-subtitle').textContent = `Otimizando trajeto a partir da base técnica: ${HQ.name}`;
-    
-    // Render Sidebar Sequence
+    // Sequence list container
     const listEl = document.getElementById('route-sequence-list');
     listEl.innerHTML = '';
     
-    // 1. Add HQ to List
-    const hqEl = document.createElement('div');
-    hqEl.className = 'sequence-item';
-    hqEl.style.borderLeft = '4px solid var(--primary)';
-    hqEl.innerHTML = `
-        <span class="seq-num" style="background:#1C1A17">🏠</span>
-        <div class="seq-details">
-            <span class="seq-title">${HQ.name}</span>
-            <span class="seq-sub">Ponto de Partida Técnico</span>
-        </div>
-    `;
-    listEl.appendChild(hqEl);
-    
-    // 2. Add Optimized points
-    optimizedPoints.forEach((p, idx) => {
-        const item = document.createElement('div');
-        item.className = 'sequence-item';
-        item.innerHTML = `
-            <span class="seq-num">${idx + 1}º</span>
-            <div class="seq-details">
-                <span class="seq-title">${p.name} (${p.protocol})</span>
-                <span class="seq-sub">${p.reason} ${p.derived ? '(Localização Estimada)' : ''}</span>
-            </div>
-        `;
-        listEl.appendChild(item);
-    });
-    
-    // 3. Add Unlocated points at end
-    unlocatedSchedules.forEach(s => {
-        const item = document.createElement('div');
-        item.className = 'sequence-item';
-        item.style.opacity = '0.6';
-        item.innerHTML = `
-            <span class="seq-num unlocated"><i data-lucide="map-pin-off" style="width:12px;height:12px"></i></span>
-            <div class="seq-details">
-                <span class="seq-title">${s.name} (${s.protocol})</span>
-                <span class="seq-sub">${s.reason} — Sem Localização</span>
-            </div>
-        `;
-        listEl.appendChild(item);
-    });
-    
-    lucide.createIcons({ props: { style: 'width: 12px; height: 12px; display: inline-block' } });
-    
-    // Render Map Elements
-    // Add Marker for HQ
+    // Colors
+    const colors = ['#0288d1', '#2e7d32', '#ed6c02', '#8e24aa', '#d32f2f', '#4caf50', '#009688'];
+    let colorIdx = 0;
+
+    // Draw HQ Marker
     const hqIcon = L.divIcon({
         className: 'hq-marker',
         html: `<div style="background:var(--text-primary);color:white;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;border:3px solid var(--border-color);box-shadow:var(--shadow-md)">🏠</div>`,
@@ -250,33 +195,258 @@ function calculateAndRenderRoute(shift) {
     L.marker([HQ.lat, HQ.lng], { icon: hqIcon })
         .addTo(markersGroup)
         .bindPopup(`<b>${HQ.name}</b><br>Base Operacional`);
+
+    let allLocatedCoords = [];
+
+    // For each vehicle group
+    Object.keys(grouped).forEach((plate) => {
+        const sList = grouped[plate];
+        const vInfo = state.vehicles.find(v => v.plate === plate);
+        const vName = vInfo ? `${plate} (${vInfo.name})` : (plate === 'sem-veiculo' ? 'Sem veículo' : plate);
         
-    // Add Markers for points
-    optimizedPoints.forEach((p, idx) => {
-        const markerIcon = L.divIcon({
-            className: 'route-marker',
-            html: `<div style="background:var(--primary);color:white;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:11px;border:2px solid white;box-shadow:var(--shadow-sm)">${idx + 1}</div>`,
-            iconSize: [26, 26],
-            iconAnchor: [13, 13]
+        let locPoints = [];
+        let unlocated = [];
+        
+        sList.forEach((s, idx) => {
+            if (s.mapLink) {
+                const coords = parseMapLink(s.mapLink, idx);
+                if (coords) {
+                    locPoints.push({
+                        ...coords,
+                        scheduleId: s.id,
+                        name: s.name,
+                        protocol: s.protocol,
+                        reason: s.reason,
+                        notes: s.notes || 'Sem observações'
+                    });
+                    locatedVisitsCount++;
+                    allLocatedCoords.push(coords);
+                    return;
+                }
+            }
+            unlocated.push(s);
         });
         
-        L.marker([p.lat, p.lng], { icon: markerIcon })
-            .addTo(markersGroup)
-            .bindPopup(`
-                <b>${idx + 1}º - ${p.name} (${p.protocol})</b><br>
-                <b>Motivo:</b> ${p.reason}<br>
-                <b>Obs:</b> ${p.notes}
-            `);
+        const optimized = optimizeRouteSequence(locPoints);
+        const routeColor = plate === 'sem-veiculo' ? '#6B6661' : colors[colorIdx % colors.length];
+        colorIdx++;
+
+        // Add vehicle group header in sequence area
+        const groupHeader = document.createElement('div');
+        groupHeader.style.padding = '8px 4px';
+        groupHeader.style.marginTop = '15px';
+        groupHeader.style.fontWeight = '800';
+        groupHeader.style.fontSize = '0.8rem';
+        groupHeader.style.borderBottom = `2px solid ${routeColor}`;
+        groupHeader.style.color = routeColor;
+        groupHeader.textContent = `VEÍCULO: ${vName.toUpperCase()}`;
+        listEl.appendChild(groupHeader);
+
+        // Add Sede technical starting point for this vehicle
+        const hqItem = document.createElement('div');
+        hqItem.className = 'sequence-item';
+        hqItem.style.borderLeft = `4px solid ${routeColor}`;
+        hqItem.innerHTML = `
+            <span class="seq-num" style="background:#1C1A17">🏠</span>
+            <div class="seq-details">
+                <span class="seq-title">${HQ.name}</span>
+                <span class="seq-sub">Base Técnica</span>
+            </div>
+        `;
+        listEl.appendChild(hqItem);
+
+        // Add optimized points
+        optimized.forEach((p, idx) => {
+            const item = document.createElement('div');
+            item.className = 'sequence-item';
+            item.style.borderLeft = `4px solid ${routeColor}`;
+            item.innerHTML = `
+                <span class="seq-num" style="background:${routeColor};">${idx + 1}º</span>
+                <div class="seq-details">
+                    <span class="seq-title">${p.name} (${p.protocol})</span>
+                    <span class="seq-sub">${p.reason} ${p.derived ? '(Localização Estimada)' : ''}</span>
+                </div>
+            `;
+            listEl.appendChild(item);
+
+            // Add markers with custom color matching vehicle
+            const markerIcon = L.divIcon({
+                className: 'route-marker',
+                html: `<div style="background:${routeColor};color:white;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:11px;border:2px solid white;box-shadow:var(--shadow-sm)">${idx + 1}</div>`,
+                iconSize: [26, 26],
+                iconAnchor: [13, 13]
+            });
+            L.marker([p.lat, p.lng], { icon: markerIcon })
+                .addTo(markersGroup)
+                .bindPopup(`
+                    <b>${idx + 1}º - ${p.name} (${p.protocol})</b><br>
+                    <b>Veículo:</b> ${vName}<br>
+                    <b>Motivo:</b> ${p.reason}<br>
+                    <b>Obs:</b> ${p.notes}
+                `);
+        });
+
+        // Add unlocated
+        unlocated.forEach(s => {
+            const item = document.createElement('div');
+            item.className = 'sequence-item';
+            item.style.opacity = '0.5';
+            item.innerHTML = `
+                <span class="seq-num unlocated"><i data-lucide="map-pin-off" style="width:12px;height:12px"></i></span>
+                <div class="seq-details">
+                    <span class="seq-title">${s.name} (${s.protocol})</span>
+                    <span class="seq-sub">${s.reason} — Sem Localização</span>
+                </div>
+            `;
+            listEl.appendChild(item);
+        });
+
+        // Draw polyline and fetch distance
+        if (optimized.length > 0) {
+            drawOSRMRouteForVehicle(optimized, routeColor, plate, vName, summaryContainer);
+        } else {
+            const summaryRow = document.createElement('div');
+            summaryRow.style.padding = '4px 0';
+            summaryRow.innerHTML = `<span style="display:inline-block; width:10px; height:10px; background:${routeColor}; border-radius:50%; margin-right:6px; vertical-align:middle;"></span><strong>${vName}</strong>: ${sList.length} visitas (Sem mapa)`;
+            summaryContainer.appendChild(summaryRow);
+        }
     });
-    
-    // Draw OSRM route or fallback straight lines
-    if (optimizedPoints.length > 0) {
-        fetchOSRMRoute(optimizedPoints);
+
+    // Update general counts
+    document.getElementById('route-total-visits').textContent = totalVisits;
+    document.getElementById('route-located-visits').textContent = locatedVisitsCount;
+    document.getElementById('modal-route-title').textContent = `Roteirização — Turno da ${shift === 'morning' ? 'Manhã' : 'Tarde'}`;
+    document.getElementById('modal-route-subtitle').textContent = `Otimizando trajeto a partir da base técnica: ${HQ.name}`;
+
+    // Fit map bounds
+    if (allLocatedCoords.length > 0) {
+        const bounds = L.latLngBounds([HQ, ...allLocatedCoords].map(p => [p.lat, p.lng]));
+        leafletMap.fitBounds(bounds, { padding: [40, 40] });
     } else {
-        // No points, fit map to HQ
         leafletMap.setView([HQ.lat, HQ.lng], 13);
     }
+    lucide.createIcons({ props: { style: 'width: 12px; height: 12px; display: inline-block' } });
 }
+
+function drawOSRMRouteForVehicle(points, color, plate, vehicleName, summaryContainer) {
+    const routeCoords = [HQ, ...points];
+    const coordString = routeCoords.map(p => `${p.lng},${p.lat}`).join(';');
+    const url = `https://router.project-osrm.org/route/v1/driving/${coordString}?overview=full&geometries=geojson`;
+    
+    const summaryRow = document.createElement('div');
+    summaryRow.id = `summary-row-${plate}`;
+    summaryRow.style.padding = '4px 0';
+    summaryRow.innerHTML = `<span style="display:inline-block; width:10px; height:10px; background:${color}; border-radius:50%; margin-right:6px; vertical-align:middle;"></span><strong>${vehicleName}</strong>: ${points.length} visitas | <span id="dist-val-${plate}">Calculando KM...</span>`;
+    summaryContainer.appendChild(summaryRow);
+
+    fetch(url)
+        .then(res => res.json())
+        .then(data => {
+            if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
+                const routeGeo = data.routes[0].geometry;
+                const pathCoordinates = routeGeo.coordinates.map(c => [c[1], c[0]]); // Swap to Lat/Lng
+                
+                const poly = L.polyline(pathCoordinates, {
+                    color: color,
+                    weight: 5,
+                    opacity: 0.8,
+                    dashArray: '2, 6'
+                }).addTo(leafletMap);
+                
+                window.routePolylines.push(poly);
+
+                const distKM = (data.routes[0].distance / 1000).toFixed(1);
+                document.getElementById(`dist-val-${plate}`).innerHTML = `<span style="color:var(--primary); font-weight:700;">${distKM} km</span>`;
+            } else {
+                throw new Error('OSRM failed');
+            }
+        })
+        .catch(err => {
+            // Fallback straight lines
+            const straightCoords = routeCoords.map(p => [p.lat, p.lng]);
+            const poly = L.polyline(straightCoords, {
+                color: color,
+                weight: 3,
+                opacity: 0.6,
+                dashArray: '5, 5'
+            }).addTo(leafletMap);
+            window.routePolylines.push(poly);
+
+            let dist = 0;
+            for(let i=0; i<routeCoords.length - 1; i++) {
+                dist += getDistance(routeCoords[i], routeCoords[i+1]) * 111000;
+            }
+            const distKM = (dist / 1000).toFixed(1);
+            document.getElementById(`dist-val-${plate}`).innerHTML = `<span style="color:var(--primary); font-weight:700;">${distKM} km (Est.)</span>`;
+        });
+}
+
+function optimizeSequenceForTech(scheds) {
+    let locPoints = [];
+    scheds.forEach((s, idx) => {
+        if (s.mapLink) {
+            const coords = parseMapLink(s.mapLink, idx);
+            if (coords) {
+                locPoints.push({ ...coords, schedule: s });
+            }
+        }
+    });
+    
+    const optimizedPoints = optimizeRouteSequence(locPoints);
+    const optimizedSchedules = optimizedPoints.map(p => p.schedule);
+    const unlocatedSchedules = scheds.filter(s => !optimizedSchedules.some(os => os.id === s.id));
+    
+    return [...optimizedSchedules, ...unlocatedSchedules];
+}
+window.optimizeSequenceForTech = optimizeSequenceForTech;
+
+function calculateAndShowTechKM(plate, morningScheds, afternoonScheds) {
+    let morningPoints = [];
+    morningScheds.forEach((s, idx) => {
+        if (s.mapLink) {
+            const coords = parseMapLink(s.mapLink, idx);
+            if (coords) morningPoints.push(coords);
+        }
+    });
+    
+    let afternoonPoints = [];
+    afternoonScheds.forEach((s, idx) => {
+        if (s.mapLink) {
+            const coords = parseMapLink(s.mapLink, idx + 10);
+            if (coords) afternoonPoints.push(coords);
+        }
+    });
+    
+    let totalDistMeters = 0;
+    
+    const fetchDist = async (pts) => {
+        if (pts.length === 0) return 0;
+        const routeCoords = [HQ, ...pts];
+        const coordString = routeCoords.map(p => `${p.lng},${p.lat}`).join(';');
+        const url = `https://router.project-osrm.org/route/v1/driving/${coordString}?overview=false`;
+        try {
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
+                return data.routes[0].distance;
+            }
+        } catch(e) {
+            let dist = 0;
+            for(let i=0; i<routeCoords.length - 1; i++) {
+                dist += getDistance(routeCoords[i], routeCoords[i+1]) * 111000;
+            }
+            return dist;
+        }
+        return 0;
+    };
+    
+    Promise.all([fetchDist(morningPoints), fetchDist(afternoonPoints)]).then(distances => {
+        const totalKM = ((distances[0] + distances[1]) / 1000).toFixed(1);
+        const kmValEl = document.getElementById('tech-km-value');
+        if (kmValEl) kmValEl.textContent = `${totalKM} km`;
+    });
+}
+window.calculateAndShowTechKM = calculateAndShowTechKM;
 
 // Call OSRM API to get route path
 function fetchOSRMRoute(points) {

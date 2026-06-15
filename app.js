@@ -34,7 +34,8 @@ let state = {
     retentionDays: 0,
     hqName: '',
     hqLat: -1.3780,
-    hqLng: -48.3720
+    hqLng: -48.3720,
+    vehicles: []
 };
 
 let activeDate = '';
@@ -66,6 +67,25 @@ async function handleUserSession(session) {
         USER_ROLE = 'super-admin';
         showView('view-super-admin');
         initSuperAdmin();
+    } else if (metadata.role === 'technician' || metadata.role === 'tecnico' || email.startsWith('tecnico@')) {
+        USER_ROLE = 'technician';
+        PROVIDER_ID = metadata.provider_id || 'linkfire';
+        PROVIDER_DISPLAY_NAME = metadata.provider_name || 'LinkFire';
+        
+        // Verificar se o provedor está ativo
+        const { data: settingsData, error } = await _supabase
+            .from('settings')
+            .select('value')
+            .eq('provider_id', PROVIDER_ID)
+            .maybeSingle();
+            
+        if (!error && settingsData && settingsData.value && settingsData.value.active === false) {
+            showView('view-inactive');
+            return;
+        }
+        
+        showView('view-technician-dashboard');
+        initTechnicianDashboard(session.user);
     } else {
         USER_ROLE = 'client';
         PROVIDER_ID = metadata.provider_id || 'linkfire';
@@ -93,8 +113,9 @@ function showView(viewId) {
     document.getElementById('view-inactive').style.display = 'none';
     document.getElementById('view-client-dashboard').style.display = 'none';
     document.getElementById('view-super-admin').style.display = 'none';
+    document.getElementById('view-technician-dashboard').style.display = 'none';
     
-    document.getElementById(viewId).style.display = (viewId === 'view-login' || viewId === 'view-inactive') ? 'flex' : 'block';
+    document.getElementById(viewId).style.display = (viewId === 'view-login' || viewId === 'view-inactive' || viewId === 'view-technician-dashboard') ? 'flex' : 'block';
 }
 
 // --- App Initialization ---
@@ -116,6 +137,7 @@ function setupAuthEventListeners() {
     
     document.getElementById('btn-logout-client').onclick = () => _supabase.auth.signOut();
     document.getElementById('btn-logout-admin').onclick = () => _supabase.auth.signOut();
+    document.getElementById('btn-logout-tech').onclick = () => _supabase.auth.signOut();
     document.getElementById('btn-back-login').onclick = () => _supabase.auth.signOut();
 }
 
@@ -200,6 +222,7 @@ async function loadSettings() {
         state.hqName = data.value.hqName || '';
         state.hqLat = data.value.hqLat || state.hqLat;
         state.hqLng = data.value.hqLng || state.hqLng;
+        state.vehicles = data.value.vehicles || [];
         
         renderHeaderLogo();
         
@@ -609,7 +632,22 @@ function renderSingleShift(shift, isReadOnly) {
     
     const footerButtons = document.querySelectorAll(`#shift-${shift} .btn-add-schedule`);
     footerButtons.forEach(btn => {
-        btn.style.display = isReadOnly ? 'none' : 'flex';
+        if (isReadOnly) {
+            btn.style.display = 'none';
+        } else {
+            btn.style.display = 'flex';
+            if (availableSlots <= 0) {
+                btn.disabled = true;
+                btn.style.opacity = '0.5';
+                btn.style.cursor = 'not-allowed';
+                btn.title = 'Este turno está lotado! Aumente o número de vagas ou libere espaço.';
+            } else {
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.style.cursor = 'pointer';
+                btn.title = '';
+            }
+        }
     });
 }
 
@@ -735,7 +773,7 @@ function openEditModal(id) {
     const radios = document.getElementsByName('vehicle');
     radios.forEach(r => { r.checked = r.value === sched.vehicle; });
     
-    populateFormOptions(sched.reason, sched.status);
+    populateFormOptions(sched.reason, sched.status, sched.vehicle);
     scheduleModal.classList.add('open');
 }
 
@@ -743,7 +781,7 @@ function closeScheduleModal() {
     scheduleModal.classList.remove('open');
 }
 
-function populateFormOptions(selectedReason = '', selectedStatus = '') {
+function populateFormOptions(selectedReason = '', selectedStatus = '', selectedVehicle = '') {
     const reasonSel = document.getElementById('field-reason');
     reasonSel.innerHTML = '';
     state.reasons.forEach(r => {
@@ -761,6 +799,18 @@ function populateFormOptions(selectedReason = '', selectedStatus = '') {
         if (s.name === selectedStatus) opt.selected = true;
         statusSel.appendChild(opt);
     });
+
+    const vehicleSel = document.getElementById('field-vehicle-id');
+    vehicleSel.innerHTML = '<option value="sem-veiculo">Sem veículo específico</option>';
+    if (state.vehicles && state.vehicles.length > 0) {
+        state.vehicles.forEach(v => {
+            const opt = document.createElement('option');
+            opt.value = v.plate;
+            opt.textContent = `${v.plate} (${v.name})`;
+            if (v.plate === selectedVehicle) opt.selected = true;
+            vehicleSel.appendChild(opt);
+        });
+    }
 }
 
 async function saveSchedule(e) {
@@ -775,8 +825,18 @@ async function saveSchedule(e) {
     const status = document.getElementById('field-status').value;
     const notes = document.getElementById('field-notes').value;
     
-    // Verificar capacidade apenas se for um novo agendamento
+    // Verificar capacidade apenas se for um novo agendamento ou se alterou o turno/data de um existente
+    let needsCapCheck = false;
     if (!id) {
+        needsCapCheck = true;
+    } else {
+        const original = state.schedules.find(s => s.id === id);
+        if (original && (original.dateStr !== dateStr || original.shift !== shift)) {
+            needsCapCheck = true;
+        }
+    }
+
+    if (needsCapCheck) {
         const daySchedules = state.schedules.filter(s => s.dateStr === dateStr && s.shift === shift);
         const capKey = `${dateStr}_${shift}`;
         if (state.capacities[capKey] === undefined) {
@@ -787,14 +847,16 @@ async function saveSchedule(e) {
         const availableSlots = Math.max(0, totalCap - scheduledCount);
         
         if (availableSlots <= 0) {
-            alert('Não foi possível salvar: Este turno está lotado! Aumente o número de vagas ou escolha outro turno.');
+            alert('Não foi possível salvar: O turno de destino está lotado! Aumente o número de vagas ou escolha outro turno.');
             return;
         }
     }
 
-    let vehicle = 'car';
-    const radios = document.getElementsByName('vehicle');
-    radios.forEach(r => { if (r.checked) vehicle = r.value; });
+    let vehicle = document.getElementById('field-vehicle-id').value;
+    if (vehicle === 'sem-veiculo') {
+        const radios = document.getElementsByName('vehicle');
+        radios.forEach(r => { if (r.checked) vehicle = r.value; });
+    }
     
     const locType = document.querySelector('input[name="loc-type"]:checked').value;
     let mapLink = '';
@@ -859,6 +921,7 @@ function openSettingsModal() {
     
     renderSettingsReasons();
     renderSettingsStatuses();
+    renderSettingsVehicles();
     settingsModal.classList.add('open');
 }
 
@@ -935,7 +998,8 @@ async function saveSettingsToDb() {
         retentionDays: state.retentionDays,
         hqName: state.hqName,
         hqLat: state.hqLat,
-        hqLng: state.hqLng
+        hqLng: state.hqLng,
+        vehicles: state.vehicles
     };
     await _supabase.from('settings').upsert({ provider_id: PROVIDER_ID, value: payload }, { onConflict: 'provider_id' });
 }
@@ -976,6 +1040,7 @@ function setupClientEventListeners() {
     
     document.getElementById('btn-add-reason').onclick = addReason;
     document.getElementById('btn-add-status').onclick = addStatus;
+    document.getElementById('btn-add-vehicle').onclick = addVehicle;
     document.getElementById('btn-save-settings').onclick = saveSettings;
     document.getElementById('form-schedule').onsubmit = saveSchedule;
     
@@ -1221,3 +1286,238 @@ async function downloadAdminBackup(providerId, fileName) {
     }
     window.open(data.signedUrl, '_blank');
 }
+
+// --- Status Color Helper ---
+function getStatusColor(statusName) {
+    const statusConfig = state.statuses.find(st => st.name === statusName);
+    return statusConfig ? statusConfig.color : '#ccc';
+}
+window.getStatusColor = getStatusColor;
+
+// --- Vehicles Configuration Helper Functions ---
+function renderSettingsVehicles() {
+    const list = document.getElementById('settings-vehicles-list');
+    if (!list) return;
+    list.innerHTML = '';
+    if (!state.vehicles) state.vehicles = [];
+    state.vehicles.forEach((v, idx) => {
+        const li = document.createElement('li');
+        li.innerHTML = `
+            <span class="settings-item-label">
+                <strong>${v.plate}</strong> — ${v.name}
+            </span>
+            <button type="button" class="btn-card-action btn-delete" onclick="deleteVehicle(${idx})">
+                <i data-lucide="trash-2"></i>
+            </button>
+        `;
+        list.appendChild(li);
+    });
+    lucide.createIcons({ props: { style: 'width: 14px; height: 14px' } });
+}
+window.renderSettingsVehicles = renderSettingsVehicles;
+
+function deleteVehicle(idx) {
+    if (!state.vehicles) state.vehicles = [];
+    state.vehicles.splice(idx, 1);
+    renderSettingsVehicles();
+}
+window.deleteVehicle = deleteVehicle;
+
+function addVehicle() {
+    const plateInput = document.getElementById('new-vehicle-plate');
+    const nameInput = document.getElementById('new-vehicle-name');
+    if (!plateInput || !nameInput) return;
+    const plate = plateInput.value.trim().toUpperCase();
+    const name = nameInput.value.trim();
+    if (plate && name) {
+        if (!state.vehicles) state.vehicles = [];
+        if (!state.vehicles.some(v => v.plate === plate)) {
+            state.vehicles.push({ plate, name });
+            plateInput.value = '';
+            nameInput.value = '';
+            renderSettingsVehicles();
+        } else {
+            alert('Um veículo com essa placa já está cadastrado.');
+        }
+    } else {
+        alert('Por favor, preencha a placa e o nome do técnico.');
+    }
+}
+window.addVehicle = addVehicle;
+
+// --- Technician Dashboard Implementations ---
+let selectedTechPlate = localStorage.getItem('gavisp_tech_plate') || '';
+
+async function initTechnicianDashboard(user) {
+    document.getElementById('tech-header-sub').textContent = PROVIDER_DISPLAY_NAME;
+    
+    // Fetch provider settings to get vehicles
+    const { data: settingsData, error } = await _supabase
+        .from('settings')
+        .select('value')
+        .eq('provider_id', PROVIDER_ID)
+        .maybeSingle();
+        
+    if (!error && settingsData && settingsData.value) {
+        state.vehicles = settingsData.value.vehicles || [];
+        state.hqLat = settingsData.value.hqLat || state.hqLat;
+        state.hqLng = settingsData.value.hqLng || state.hqLng;
+        state.hqName = settingsData.value.hqName || PROVIDER_DISPLAY_NAME;
+        if (window.updateHQ) {
+            window.updateHQ(state.hqLat, state.hqLng, state.hqName);
+        }
+    }
+    
+    // Setup plate dropdown selector
+    const plateSelect = document.getElementById('tech-plate-select');
+    if (plateSelect) {
+        plateSelect.innerHTML = '<option value="">-- Escolha seu Veículo / Placa --</option>';
+        state.vehicles.forEach(v => {
+            const opt = document.createElement('option');
+            opt.value = v.plate;
+            opt.textContent = `${v.plate} (${v.name})`;
+            if (v.plate === selectedTechPlate) opt.selected = true;
+            plateSelect.appendChild(opt);
+        });
+        
+        plateSelect.onchange = () => {
+            selectedTechPlate = plateSelect.value;
+            localStorage.setItem('gavisp_tech_plate', selectedTechPlate);
+            renderTechnicianDashboard();
+        };
+    }
+    
+    // Set formatted date title
+    const today = new Date();
+    const day = String(today.getDate()).padStart(2, '0');
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const year = today.getFullYear();
+    activeDate = `${year}-${month}-${day}`;
+    
+    const options = { weekday: 'long', day: 'numeric', month: 'long' };
+    const dateTitle = today.toLocaleDateString('pt-BR', options);
+    document.getElementById('tech-today-title').textContent = dateTitle.charAt(0).toUpperCase() + dateTitle.slice(1);
+    
+    await loadSchedules();
+    renderTechnicianDashboard();
+}
+window.initTechnicianDashboard = initTechnicianDashboard;
+
+async function renderTechnicianDashboard() {
+    const listEl = document.getElementById('tech-schedules-list');
+    if (!listEl) return;
+    listEl.innerHTML = '';
+    
+    if (!selectedTechPlate) {
+        listEl.innerHTML = `
+            <div style="text-align:center; padding:40px; color:var(--text-secondary); background:var(--surface); border:1px solid var(--border-color); border-radius:var(--border-radius-md);">
+                <i data-lucide="info" style="width:36px; height:36px; color:var(--primary); margin-bottom:12px;"></i>
+                <p style="font-weight:600;">Selecione uma placa acima para ver sua agenda de hoje.</p>
+            </div>
+        `;
+        document.getElementById('tech-summary-total').textContent = '0 visitas';
+        document.getElementById('tech-summary-completed').textContent = '0 concluídas';
+        document.getElementById('tech-km-value').textContent = '0.0 km';
+        lucide.createIcons();
+        return;
+    }
+    
+    // Filter schedules for today and for selected vehicle plate
+    const techSchedules = state.schedules.filter(s => s.dateStr === activeDate && s.vehicle === selectedTechPlate);
+    
+    // Optimize tech route order (separate morning and afternoon or combine)
+    const morningScheds = techSchedules.filter(s => s.shift === 'morning');
+    const afternoonScheds = techSchedules.filter(s => s.shift === 'afternoon');
+    
+    const optMorning = window.optimizeSequenceForTech ? window.optimizeSequenceForTech(morningScheds) : morningScheds;
+    const optAfternoon = window.optimizeSequenceForTech ? window.optimizeSequenceForTech(afternoonScheds) : afternoonScheds;
+    
+    const orderedSchedules = [...optMorning, ...optAfternoon];
+    const totalCount = orderedSchedules.length;
+    const completedCount = orderedSchedules.filter(s => s.status === 'Realizado').length;
+    
+    document.getElementById('tech-summary-total').textContent = `${totalCount} visitas`;
+    document.getElementById('tech-summary-completed').textContent = `${completedCount} concluídas`;
+    
+    // Calculate and show tech estimated KM
+    if (window.calculateAndShowTechKM) {
+        window.calculateAndShowTechKM(selectedTechPlate, optMorning, optAfternoon);
+    }
+    
+    if (orderedSchedules.length === 0) {
+        listEl.innerHTML = `
+            <div style="text-align:center; padding:40px; color:var(--text-secondary); background:var(--surface); border:1px solid var(--border-color); border-radius:var(--border-radius-md);">
+                <i data-lucide="check-circle-2" style="width:36px; height:36px; color:var(--status-green); margin-bottom:12px;"></i>
+                <p style="font-weight:600;">Parabéns! Nenhuma visita agendada para este veículo hoje.</p>
+            </div>
+        `;
+        lucide.createIcons();
+        return;
+    }
+    
+    orderedSchedules.forEach((s, idx) => {
+        const card = document.createElement('div');
+        const isCompleted = s.status === 'Realizado';
+        card.className = `tech-card ${isCompleted ? 'completed' : ''}`;
+        
+        // Maps link handling
+        let mapsUrl = s.mapLink || '#';
+        
+        card.innerHTML = `
+            <div class="tech-card-header">
+                <span class="tech-card-num">${idx + 1}º</span>
+                <span class="card-protocol">${s.protocol}</span>
+            </div>
+            
+            <div>
+                <h3 style="font-size:1.1rem; font-weight:700; margin-bottom:4px;">${s.name}</h3>
+                <p style="font-size:0.8rem; font-weight:600; color:var(--text-secondary); margin-bottom:8px;">
+                    Turno: ${s.shift === 'morning' ? 'Manhã' : 'Tarde'}
+                </p>
+                <div style="display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap;">
+                    <span class="badge-reason">${s.reason}</span>
+                    <span class="badge-status" style="background:${getStatusColor(s.status)}">${s.status}</span>
+                </div>
+                
+                ${s.notes ? `
+                    <div style="background:var(--bg-app); border:1px solid var(--border-color); padding:10px; border-radius:var(--border-radius-md); font-size:0.8rem; margin-top:8px;">
+                        <strong>Obs:</strong> ${s.notes}
+                    </div>
+                ` : ''}
+            </div>
+            
+            <div class="tech-card-actions">
+                <a href="${mapsUrl}" target="_blank" class="btn-tech-action">
+                    <i data-lucide="navigation" style="width:18px; height:18px;"></i>
+                    Navegar
+                </a>
+                <a href="tel:${s.phone.replace(/\D/g, '')}" class="btn-tech-action">
+                    <i data-lucide="phone" style="width:18px; height:18px;"></i>
+                    Ligar
+                </a>
+                <button class="btn-tech-action ${isCompleted ? 'btn-reopen' : 'btn-complete'}" onclick="toggleTechComplete('${s.id}')">
+                    <i data-lucide="${isCompleted ? 'rotate-ccw' : 'check'}" style="width:18px; height:18px;"></i>
+                    ${isCompleted ? 'Reabrir' : 'Finalizar'}
+                </button>
+            </div>
+        `;
+        listEl.appendChild(card);
+    });
+    
+    lucide.createIcons();
+}
+window.renderTechnicianDashboard = renderTechnicianDashboard;
+
+async function toggleTechComplete(id) {
+    const sched = state.schedules.find(s => s.id === id);
+    if (sched) {
+        const nextStatus = sched.status === 'Realizado' ? 'Confirmado' : 'Realizado';
+        sched.status = nextStatus;
+        renderTechnicianDashboard();
+        await _supabase.from('schedules').update({ status: nextStatus }).eq('id', id);
+        await loadSchedules();
+        renderTechnicianDashboard();
+    }
+}
+window.toggleTechComplete = toggleTechComplete;
+
