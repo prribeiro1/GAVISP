@@ -72,10 +72,11 @@ async function handleUserSession(session) {
         
         let detectedProviderId = metadata.provider_id || '';
         if (!detectedProviderId && (email.startsWith('tecnico.') || email.startsWith('tecnico@'))) {
-            // Se for tecnico.provedorid@email.com, extrai o provedorid
             const prefix = email.split('@')[0];
             if (prefix.startsWith('tecnico.')) {
-                detectedProviderId = prefix.split('.')[1] || '';
+                const parts = prefix.split('.');
+                const lastPart = parts[parts.length - 1] || '';
+                detectedProviderId = lastPart.split('+')[0] || '';
             }
         }
         
