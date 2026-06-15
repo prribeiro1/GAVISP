@@ -48,8 +48,7 @@
     <section id="view-client-dashboard" style="display: none;">
         <header class="app-header">
             <div class="header-container">
-                <div class="brand">
-                    <span class="logo-icon">🔥</span>
+                <div class="brand" id="brand-logo-container">
                     <div class="brand-text">
                         <h1 id="header-brand-name">LinkFire</h1>
                         <span class="brand-sub">Fibra Óptica</span>
@@ -381,10 +380,9 @@
                             <label for="settings-default-afternoon">Vagas Padrão — Tarde</label>
                             <input type="number" id="settings-default-afternoon" min="1" max="50">
                         </div>
-                        <div class="form-group" style="margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 20px;">
+                        <div class="form-group" style="display: none;">
                             <label for="settings-retention-days">Limpeza Automática de Histórico (Dias)</label>
-                            <input type="number" id="settings-retention-days" min="0" placeholder="Ex: 7 (0 para desativar)">
-                            <span class="field-help">Apaga agendamentos concluídos com mais de X dias para economizar espaço no Supabase.</span>
+                            <input type="number" id="settings-retention-days" min="0">
                         </div>
                     </div>
 
@@ -394,7 +392,7 @@
                         
                         <div class="form-group">
                             <label for="settings-hq-name">Nome da Sede / Base</label>
-                            <input type="text" id="settings-hq-name" placeholder="Ex: Sede LinkFire">
+                            <input type="text" id="settings-hq-name" placeholder="Ex: Sede Principal (Deixe em branco para usar o nome da empresa)">
                         </div>
                         <div class="form-row">
                             <div class="form-group col-6">
@@ -410,6 +408,17 @@
                             <i data-lucide="locate"></i>
                             Obter Localização Atual (GPS)
                         </button>
+
+                        <div class="form-group" style="margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 20px;">
+                            <label for="settings-logo-upload">Logo da Empresa (Formato Horizontal)</label>
+                            <input type="file" id="settings-logo-upload" accept="image/*">
+                            <span class="field-help">Selecione uma imagem horizontal para substituir o nome em texto no cabeçalho.</span>
+                            <div id="settings-logo-preview-container" style="margin-top: 10px; display: none;">
+                                <span class="field-help" style="margin-bottom: 4px;">Pré-visualização:</span>
+                                <img id="settings-logo-preview" style="max-height: 40px; border: 1px solid var(--border-color); padding: 4px; border-radius: 4px; background: white;">
+                                <button type="button" class="btn btn-secondary" id="btn-remove-logo" style="padding: 4px 8px; font-size: 0.7rem; margin-left: 10px; vertical-align: middle;">Remover Logo</button>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="settings-section" id="section-reasons">

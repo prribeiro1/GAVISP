@@ -188,6 +188,7 @@ function calculateAndRenderRoute(shift) {
     document.getElementById('route-total-visits').textContent = daySchedules.length;
     document.getElementById('route-located-visits').textContent = optimizedPoints.length;
     document.getElementById('modal-route-title').textContent = `Roteirização — Turno da ${shift === 'morning' ? 'Manhã' : 'Tarde'}`;
+    document.getElementById('modal-route-subtitle').textContent = `Otimizando trajeto a partir da base técnica: ${HQ.name}`;
     
     // Render Sidebar Sequence
     const listEl = document.getElementById('route-sequence-list');

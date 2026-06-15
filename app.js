@@ -4,8 +4,9 @@ const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 const _supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
 
 // --- State Cache ---
-let PROVIDER_ID = 'linkfire'; // Dynamically set on client login
-let USER_ROLE = 'client'; // 'client' or 'super-admin'
+let PROVIDER_ID = 'linkfire'; 
+let USER_ROLE = 'client'; 
+let PROVIDER_DISPLAY_NAME = 'LinkFire';
 let realtimeChannel = null;
 
 let state = {
@@ -31,9 +32,10 @@ let state = {
     defaultMorning: 5,
     defaultAfternoon: 5,
     retentionDays: 0,
-    hqName: 'Sede LinkFire',
+    hqName: '',
     hqLat: -1.3780,
-    hqLng: -48.3720
+    hqLng: -48.3720,
+    logo: ''
 };
 
 let activeDate = '';
@@ -61,7 +63,6 @@ function handleUserSession(session) {
     const email = session.user.email;
     const metadata = session.user.user_metadata || {};
     
-    // Determine user role (Metadata role or admin email fallback)
     if (metadata.role === 'super-admin' || email === 'admin@gavisp.com.br') {
         USER_ROLE = 'super-admin';
         showView('view-super-admin');
@@ -69,10 +70,7 @@ function handleUserSession(session) {
     } else {
         USER_ROLE = 'client';
         PROVIDER_ID = metadata.provider_id || 'linkfire';
-        
-        // Dynamically set client header name based on metadata
-        const brandName = metadata.provider_name || 'LinkFire';
-        document.getElementById('header-brand-name').textContent = brandName;
+        PROVIDER_DISPLAY_NAME = metadata.provider_name || 'LinkFire';
         
         showView('view-client-dashboard');
         initClientDashboard();
@@ -93,7 +91,6 @@ window.onload = () => {
 };
 
 function setupAuthEventListeners() {
-    // Login Submission
     document.getElementById('form-login').onsubmit = async (e) => {
         e.preventDefault();
         const email = document.getElementById('login-email').value;
@@ -105,7 +102,6 @@ function setupAuthEventListeners() {
         }
     };
     
-    // Logouts
     document.getElementById('btn-logout-client').onclick = () => _supabase.auth.signOut();
     document.getElementById('btn-logout-admin').onclick = () => _supabase.auth.signOut();
 }
@@ -170,17 +166,34 @@ async function loadSettings() {
         state.defaultMorning = data.value.defaultMorning || state.defaultMorning;
         state.defaultAfternoon = data.value.defaultAfternoon || state.defaultAfternoon;
         state.retentionDays = data.value.retentionDays || 0;
-        state.hqName = data.value.hqName || state.hqName;
+        state.hqName = data.value.hqName || '';
         state.hqLat = data.value.hqLat || state.hqLat;
         state.hqLng = data.value.hqLng || state.hqLng;
+        state.logo = data.value.logo || '';
+        
+        renderHeaderLogo();
         
         if (window.updateHQ) {
-            window.updateHQ(state.hqLat, state.hqLng, state.hqName);
+            window.updateHQ(state.hqLat, state.hqLng, state.hqName || PROVIDER_DISPLAY_NAME);
         }
         
         runDataRetention();
     } else {
         await saveSettingsToDb();
+    }
+}
+
+function renderHeaderLogo() {
+    const brandContainer = document.getElementById('brand-logo-container');
+    if (state.logo) {
+        brandContainer.innerHTML = `<img src="${state.logo}" alt="${PROVIDER_DISPLAY_NAME}" style="max-height: 46px; max-width: 180px; object-fit: contain;">`;
+    } else {
+        brandContainer.innerHTML = `
+            <div class="brand-text">
+                <h1 id="header-brand-name">${PROVIDER_DISPLAY_NAME}</h1>
+                <span class="brand-sub">Fibra Óptica</span>
+            </div>
+        `;
     }
 }
 
@@ -289,7 +302,6 @@ async function runDataRetention() {
     limitDate.setDate(limitDate.getDate() - state.retentionDays);
     const limitDateStr = getFormattedDate(limitDate);
     
-    // Fetch records to be deleted
     const { data: toDelete, error: fetchErr } = await _supabase
         .from('schedules')
         .select('*')
@@ -299,7 +311,6 @@ async function runDataRetention() {
         
     if (fetchErr || !toDelete || toDelete.length === 0) return;
     
-    // Format to CSV
     let csvText = '\uFEFF';
     csvText += 'Protocolo;Data;Turno;Cliente;Telefone;Veículo;Motivo;Status;Link Localização;Observações\n';
     toDelete.forEach(s => {
@@ -318,7 +329,6 @@ async function runDataRetention() {
         csvText += row.join(';') + '\n';
     });
     
-    // Upload CSV to Storage
     const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
     const filename = `purges/${PROVIDER_ID}/backup_historico_${getFormattedDate(new Date())}_${Date.now()}.csv`;
     
@@ -329,10 +339,8 @@ async function runDataRetention() {
         
     if (uploadErr) {
         console.error('Erro ao enviar backup histórico para o Storage:', uploadErr);
-        // Continue to delete anyway, or halt. Better catch and continue.
     }
     
-    // Delete lines
     const { error: delErr } = await _supabase
         .from('schedules')
         .delete()
@@ -776,6 +784,15 @@ function openSettingsModal() {
     document.getElementById('settings-hq-lat').value = state.hqLat;
     document.getElementById('settings-hq-lng').value = state.hqLng;
     
+    // Manage Logo Preview inside Settings Modal
+    const logoPreviewContainer = document.getElementById('settings-logo-preview-container');
+    if (state.logo) {
+        document.getElementById('settings-logo-preview').src = state.logo;
+        logoPreviewContainer.style.display = 'block';
+    } else {
+        logoPreviewContainer.style.display = 'none';
+    }
+    
     renderSettingsReasons();
     renderSettingsStatuses();
     settingsModal.classList.add('open');
@@ -830,17 +847,18 @@ async function saveSettings() {
     state.defaultMorning = parseInt(document.getElementById('settings-default-morning').value, 10) || 5;
     state.defaultAfternoon = parseInt(document.getElementById('settings-default-afternoon').value, 10) || 5;
     state.retentionDays = parseInt(document.getElementById('settings-retention-days').value, 10) || 0;
-    state.hqName = document.getElementById('settings-hq-name').value || state.hqName;
+    state.hqName = document.getElementById('settings-hq-name').value || '';
     state.hqLat = parseFloat(document.getElementById('settings-hq-lat').value) || state.hqLat;
     state.hqLng = parseFloat(document.getElementById('settings-hq-lng').value) || state.hqLng;
     
     closeSettingsModal();
-    renderAll();
     
     if (window.updateHQ) {
-        window.updateHQ(state.hqLat, state.hqLng, state.hqName);
+        window.updateHQ(state.hqLat, state.hqLng, state.hqName || PROVIDER_DISPLAY_NAME);
     }
     await saveSettingsToDb();
+    renderHeaderLogo();
+    renderAll();
     runDataRetention();
 }
 
@@ -853,7 +871,8 @@ async function saveSettingsToDb() {
         retentionDays: state.retentionDays,
         hqName: state.hqName,
         hqLat: state.hqLat,
-        hqLng: state.hqLng
+        hqLng: state.hqLng,
+        logo: state.logo
     };
     await _supabase.from('settings').upsert({ provider_id: PROVIDER_ID, value: payload }, { onConflict: 'provider_id' });
 }
@@ -871,6 +890,8 @@ function setupClientEventListeners() {
             renderSingleShift(shift, daysList.find(d => d.dateStr === activeDate)?.isPast);
         };
     });
+    
+    // Target the specific dynamic buttons in app grids
     document.querySelectorAll('.btn-add-schedule').forEach(btn => {
         btn.onclick = () => { openAddModal(btn.dataset.shift); };
     });
@@ -897,17 +918,45 @@ function setupClientEventListeners() {
     document.getElementById('loc-type-link').onchange = toggleLocFields;
     document.getElementById('loc-type-address').onchange = toggleLocFields;
     
+    // GPS location fetcher
     document.getElementById('btn-hq-current-location').onclick = () => {
-        if (!navigator.geolocation) { alert('GPS indisponível.'); return; }
+        if (!navigator.geolocation) {
+            alert('Geolocalização não suportada no seu navegador.');
+            return;
+        }
         navigator.geolocation.getCurrentPosition(
             (pos) => {
                 document.getElementById('settings-hq-lat').value = pos.coords.latitude.toFixed(6);
                 document.getElementById('settings-hq-lng').value = pos.coords.longitude.toFixed(6);
-                alert('Localização obtida!');
+                alert('Localização obtida com sucesso via GPS do dispositivo!');
             },
-            () => { alert('Erro ao buscar GPS.'); },
+            (err) => {
+                console.error(err);
+                alert('Erro ao buscar GPS. Verifique se concedeu permissão de localização ao navegador para este site (ícone de cadeado na barra de endereços).');
+            },
             { enableHighAccuracy: true }
         );
+    };
+    
+    // Logo Upload Reader
+    document.getElementById('settings-logo-upload').onchange = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                state.logo = event.target.result; // Base64
+                document.getElementById('settings-logo-preview').src = state.logo;
+                document.getElementById('settings-logo-preview-container').style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+    
+    // Logo Remover
+    document.getElementById('btn-remove-logo').onclick = () => {
+        state.logo = '';
+        document.getElementById('settings-logo-upload').value = '';
+        document.getElementById('settings-logo-preview-container').style.display = 'none';
     };
     
     document.getElementById('slider-prev').onclick = () => { document.getElementById('days-nav-container').scrollLeft -= 150; };
@@ -917,7 +966,6 @@ function setupClientEventListeners() {
 // --- Super Admin Control Panel Functions ---
 
 async function initSuperAdmin() {
-    // 1. Fetch active providers listing from settings table
     const { data: providersList, error } = await _supabase
         .from('settings')
         .select('provider_id, value');
@@ -927,14 +975,12 @@ async function initSuperAdmin() {
         return;
     }
     
-    // Fetch stats
     const { data: scheds, error: scErr } = await _supabase.from('schedules').select('id');
     const totalSchedules = scErr ? 0 : (scheds ? scheds.length : 0);
     
     document.getElementById('admin-stat-clients').textContent = providersList.length;
     document.getElementById('admin-stat-schedules').textContent = totalSchedules;
     
-    // Render Providers Sidebar
     const listContainer = document.getElementById('admin-provider-list');
     listContainer.innerHTML = '';
     
@@ -968,7 +1014,6 @@ async function selectAdminProvider(providerId, providerName) {
     document.getElementById('admin-backup-explorer').style.display = 'block';
     document.getElementById('admin-selected-provider-title').textContent = `Backups — ${providerName}`;
     
-    // List backups for this provider in storage
     const { data: files, error } = await _supabase
         .storage
         .from('backups')
@@ -1002,13 +1047,11 @@ async function downloadAdminBackup(providerId, fileName) {
     const { data, error } = await _supabase
         .storage
         .from('backups')
-        .createSignedUrl(`purges/${providerId}/${fileName}`, 60); // 60s expiration
+        .createSignedUrl(`purges/${providerId}/${fileName}`, 60);
         
     if (error || !data) {
-        alert('Erro ao gerar link de download: ' + (error ? error.message : 'Nenhum dado retornado'));
+        alert('Erro ao gerar link de download: ' + (error ? error.message : 'Falha'));
         return;
     }
-    
-    // Open signed url to start browser download
     window.open(data.signedUrl, '_blank');
 }
