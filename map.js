@@ -15,6 +15,7 @@ function updateHQ(lat, lng, name) {
         leafletMap.setView([HQ.lat, HQ.lng]);
     }
 }
+window.updateHQ = updateHQ;
 
 let leafletMap = null;
 let markersGroup = null;

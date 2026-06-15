@@ -121,19 +121,37 @@ function setupAuthEventListeners() {
 
 // --- Client Dashboard Logic ---
 async function initClientDashboard() {
-    generateDaysList();
-    
-    const today = new Date();
-    activeDate = daysList[0]?.dateStr || getFormattedDate(today);
-    
-    setupClientEventListeners();
-    
-    await loadSettings();
-    await loadSchedules();
-    await loadCapacities();
-    
-    renderAll();
-    setupRealtimeSubscriptions();
+    try {
+        generateDaysList();
+        
+        const today = new Date();
+        activeDate = daysList[0]?.dateStr || getFormattedDate(today);
+        
+        setupClientEventListeners();
+        
+        try {
+            await loadSettings();
+        } catch (err) {
+            console.error("Erro ao carregar configurações:", err);
+        }
+        
+        try {
+            await loadSchedules();
+        } catch (err) {
+            console.error("Erro ao carregar agendamentos:", err);
+        }
+        
+        try {
+            await loadCapacities();
+        } catch (err) {
+            console.error("Erro ao carregar capacidades:", err);
+        }
+        
+        renderAll();
+        setupRealtimeSubscriptions();
+    } catch (err) {
+        console.error("Erro geral na inicialização do dashboard:", err);
+    }
     lucide.createIcons();
 }
 
@@ -197,12 +215,15 @@ async function loadSettings() {
 
 function renderHeaderLogo() {
     const brandContainer = document.getElementById('brand-logo-container');
-    brandContainer.innerHTML = `
-        <div class="brand-text">
-            <h1 id="header-brand-name">${PROVIDER_DISPLAY_NAME}</h1>
-            <span class="brand-sub">Fibra Óptica</span>
-        </div>
-    `;
+    if (brandContainer) {
+        const displayName = state.hqName || PROVIDER_DISPLAY_NAME;
+        brandContainer.innerHTML = `
+            <div class="brand-text">
+                <h1 id="header-brand-name">${displayName}</h1>
+                <span class="brand-sub">ID: ${PROVIDER_ID}</span>
+            </div>
+        `;
+    }
 }
 
 async function loadSchedules() {
@@ -656,6 +677,21 @@ function openAddModal(shift) {
     const todayInfo = daysList.find(d => d.dateStr === activeDate);
     if (todayInfo && todayInfo.isPast) return;
     
+    // Verificar capacidade antes de permitir o agendamento
+    const daySchedules = state.schedules.filter(s => s.dateStr === activeDate && s.shift === shift);
+    const capKey = `${activeDate}_${shift}`;
+    if (state.capacities[capKey] === undefined) {
+        state.capacities[capKey] = shift === 'morning' ? state.defaultMorning : state.defaultAfternoon;
+    }
+    const totalCap = state.capacities[capKey];
+    const scheduledCount = daySchedules.length;
+    const availableSlots = Math.max(0, totalCap - scheduledCount);
+    
+    if (availableSlots <= 0) {
+        alert('Este turno está lotado! Aumente o número de vagas na tela principal ou escolha outro turno.');
+        return;
+    }
+    
     document.getElementById('form-schedule').reset();
     document.getElementById('modal-schedule-title').textContent = 'Novo Agendamento';
     document.getElementById('field-id').value = '';
@@ -739,6 +775,23 @@ async function saveSchedule(e) {
     const status = document.getElementById('field-status').value;
     const notes = document.getElementById('field-notes').value;
     
+    // Verificar capacidade apenas se for um novo agendamento
+    if (!id) {
+        const daySchedules = state.schedules.filter(s => s.dateStr === dateStr && s.shift === shift);
+        const capKey = `${dateStr}_${shift}`;
+        if (state.capacities[capKey] === undefined) {
+            state.capacities[capKey] = shift === 'morning' ? state.defaultMorning : state.defaultAfternoon;
+        }
+        const totalCap = state.capacities[capKey];
+        const scheduledCount = daySchedules.length;
+        const availableSlots = Math.max(0, totalCap - scheduledCount);
+        
+        if (availableSlots <= 0) {
+            alert('Não foi possível salvar: Este turno está lotado! Aumente o número de vagas ou escolha outro turno.');
+            return;
+        }
+    }
+
     let vehicle = 'car';
     const radios = document.getElementsByName('vehicle');
     radios.forEach(r => { if (r.checked) vehicle = r.value; });

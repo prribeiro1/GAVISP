@@ -441,32 +441,19 @@
             </div>
             <div class="modal-body settings-layout">
                 <div class="settings-tabs">
-                    <button class="settings-tab-btn active" data-section="section-slots">Capacidade Padrão</button>
-                    <button class="settings-tab-btn" data-section="section-hq">Localização da Sede</button>
+                    <button class="settings-tab-btn active" data-section="section-hq">Localização da Sede</button>
                     <button class="settings-tab-btn" data-section="section-reasons">Motivos de Visita</button>
                     <button class="settings-tab-btn" data-section="section-statuses">Status de Agendamento</button>
                 </div>
                 
                 <div class="settings-panel-content">
-                    <div class="settings-section active" id="section-slots">
-                        <h4>Definir Vagas Padrão</h4>
-                        <p class="section-desc">Essas vagas serão aplicadas automaticamente para novos dias gerados na plataforma.</p>
-                        
-                        <div class="form-group">
-                            <label for="settings-default-morning">Vagas Padrão — Manhã</label>
-                            <input type="number" id="settings-default-morning" min="1" max="50">
-                        </div>
-                        <div class="form-group">
-                            <label for="settings-default-afternoon">Vagas Padrão — Tarde</label>
-                            <input type="number" id="settings-default-afternoon" min="1" max="50">
-                        </div>
-                        <div class="form-group" style="display: none;">
-                            <label for="settings-retention-days">Limpeza Automática de Histórico (Dias)</label>
-                            <input type="number" id="settings-retention-days" min="0">
-                        </div>
+                    <div class="settings-section" id="section-slots" style="display: none;">
+                        <input type="hidden" id="settings-default-morning" value="5">
+                        <input type="hidden" id="settings-default-afternoon" value="5">
+                        <input type="hidden" id="settings-retention-days" value="0">
                     </div>
 
-                    <div class="settings-section" id="section-hq">
+                    <div class="settings-section active" id="section-hq">
                         <h4>Localização da Sede (Ponto de Partida)</h4>
                         <p class="section-desc">Defina o ponto inicial e coordenadas da base técnica do provedor.</p>
                         
