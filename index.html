@@ -327,6 +327,8 @@
                     <input type="hidden" id="field-id">
                     <input type="hidden" id="field-date">
                     <input type="hidden" id="field-shift">
+                    <input type="hidden" id="field-manual-lat">
+                    <input type="hidden" id="field-manual-lng">
                     
                     <div class="form-row">
                         <div class="form-group col-6">
@@ -397,9 +399,10 @@
                         <span class="field-help">Essencial para gerar a rota otimizada no turno.</span>
                     </div>
 
-                    <div class="form-group" id="loc-address-group" style="display: none;">
+                    <div class="form-group" id="loc-address-group" style="display: none; position: relative;">
                         <label for="field-address">Endereço Completo</label>
-                        <input type="text" id="field-address" placeholder="Rua, Número, Bairro, Cidade, Estado (Ex: Av. Claudio Sanders, 1500, Ananindeua, PA)">
+                        <input type="text" id="field-address" placeholder="Rua, Número, Bairro, Cidade, Estado (Ex: Av. Claudio Sanders, 1500, Ananindeua, PA)" autocomplete="off">
+                        <div id="address-suggestions" style="display: none; position: absolute; left: 0; right: 0; z-index: 1000; background: var(--surface); border: 1px solid var(--border-color); border-radius: var(--border-radius-md); box-shadow: var(--shadow-md); max-height: 200px; overflow-y: auto; margin-top: 2px;"></div>
                         <span class="field-help">Nosso sistema buscará as coordenadas no mapa automaticamente.</span>
                     </div>
 
@@ -489,9 +492,13 @@
                     <div class="settings-section" id="section-vehicles">
                         <h4>Cadastro de Veículos / Frota</h4>
                         <p class="section-desc">Cadastre a placa e o técnico responsável de cada veículo para delegação das visitas.</p>
-                        <div class="add-setting-inline">
+                        <div class="add-setting-inline" style="display: flex; gap: 8px; flex-wrap: wrap;">
                             <input type="text" id="new-vehicle-plate" placeholder="Placa (Ex: ABC-1234)" style="flex: 1; min-width: 100px; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--border-radius-md);">
                             <input type="text" id="new-vehicle-name" placeholder="Nome do Técnico (Ex: João)" style="flex: 2; min-width: 150px; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--border-radius-md);">
+                            <select id="new-vehicle-type" style="flex: 1; min-width: 100px; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--border-radius-md); font-family: inherit;">
+                                <option value="car">🚗 Carro</option>
+                                <option value="motorcycle">🏍️ Moto</option>
+                            </select>
                             <button class="btn btn-primary" id="btn-add-vehicle">Adicionar</button>
                         </div>
                         <ul class="settings-list-items" id="settings-vehicles-list" style="margin-top: 15px; max-height: 200px; overflow-y: auto;"></ul>

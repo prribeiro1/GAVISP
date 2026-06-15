@@ -546,12 +546,19 @@ function renderSingleShift(shift, isReadOnly) {
         badgeEl.className = 'badge-vagas red';
     }
     
-    const vehiclesPresent = [...new Set(daySchedules.map(s => s.vehicle))];
+    const vehiclesPresent = [...new Set(daySchedules.map(s => {
+        let resolvedType = s.vehicle;
+        const mappedVehicle = state.vehicles.find(v => v.plate === s.vehicle);
+        if (mappedVehicle) {
+            resolvedType = mappedVehicle.type;
+        }
+        return resolvedType === 'motorcycle' ? '🏍️' : '🚗';
+    }))];
     const presenceEl = document.getElementById(`${shift}-vehicle-presence`);
     presenceEl.innerHTML = '';
-    vehiclesPresent.forEach(v => {
+    vehiclesPresent.forEach(icon => {
         const iconSpan = document.createElement('span');
-        iconSpan.textContent = v === 'car' ? '🚗' : '🏍️';
+        iconSpan.textContent = icon;
         presenceEl.appendChild(iconSpan);
     });
     
@@ -563,7 +570,12 @@ function renderSingleShift(shift, isReadOnly) {
     const currentFilter = shiftFilters[shift];
     const filteredSchedules = daySchedules.filter(s => {
         if (currentFilter === 'all') return true;
-        return s.vehicle === currentFilter;
+        let resolvedType = s.vehicle;
+        const mappedVehicle = state.vehicles.find(v => v.plate === s.vehicle);
+        if (mappedVehicle) {
+            resolvedType = mappedVehicle.type;
+        }
+        return resolvedType === currentFilter;
     });
     
     if (filteredSchedules.length === 0) {
@@ -614,7 +626,14 @@ function renderSingleShift(shift, isReadOnly) {
                     </div>
                 </div>
                 <div class="card-middle">
-                    <span class="card-vehicle-icon">${sched.vehicle === 'car' ? '🚗' : '🏍️'}</span>
+                    <span class="card-vehicle-icon">${(() => {
+                        let resolvedType = sched.vehicle;
+                        const mappedVehicle = state.vehicles.find(v => v.plate === sched.vehicle);
+                        if (mappedVehicle) {
+                            resolvedType = mappedVehicle.type;
+                        }
+                        return resolvedType === 'motorcycle' ? '🏍️' : '🚗';
+                    })()}</span>
                     <div class="card-client-info">
                         <span class="client-name">${sched.name}</span>
                         <a href="tel:${sched.phone}" class="client-phone"><i data-lucide="phone" style="width:10px;height:10px;display:inline-block;vertical-align:middle;margin-right:2px;"></i>${sched.phone}</a>
@@ -735,6 +754,8 @@ function openAddModal(shift) {
     document.getElementById('field-id').value = '';
     document.getElementById('field-date').value = activeDate;
     document.getElementById('field-shift').value = shift;
+    document.getElementById('field-manual-lat').value = '';
+    document.getElementById('field-manual-lng').value = '';
     
     const num = Math.floor(100000 + Math.random() * 900000);
     document.getElementById('field-protocol').value = `LF-${num}`;
@@ -758,11 +779,21 @@ function openEditModal(id) {
     document.getElementById('field-phone').value = sched.phone;
     document.getElementById('field-notes').value = sched.notes || '';
     
+    document.getElementById('field-manual-lat').value = '';
+    document.getElementById('field-manual-lng').value = '';
     const isManualAddress = sched.mapLink && sched.mapLink.includes('maps.google.com/?q=');
     if (isManualAddress) {
         document.getElementById('loc-type-address').checked = true;
         document.getElementById('field-address').value = '';
         document.getElementById('field-map-link').value = '';
+        const parts = sched.mapLink.split('?q=');
+        if (parts.length > 1) {
+            const coords = parts[1].split(',');
+            if (coords.length === 2) {
+                document.getElementById('field-manual-lat').value = coords[0];
+                document.getElementById('field-manual-lng').value = coords[1];
+            }
+        }
     } else {
         document.getElementById('loc-type-link').checked = true;
         document.getElementById('field-map-link').value = sched.mapLink || '';
@@ -860,13 +891,17 @@ async function saveSchedule(e) {
     
     const locType = document.querySelector('input[name="loc-type"]:checked').value;
     let mapLink = '';
-    closeScheduleModal();
     
     if (locType === 'link') {
         mapLink = document.getElementById('field-map-link').value;
     } else {
         const address = document.getElementById('field-address').value;
-        if (address) {
+        const manualLat = document.getElementById('field-manual-lat').value;
+        const manualLng = document.getElementById('field-manual-lng').value;
+        
+        if (manualLat && manualLng) {
+            mapLink = `https://maps.google.com/?q=${manualLat},${manualLng}`;
+        } else if (address) {
             const coords = await geocodeAddress(address);
             if (coords) {
                 mapLink = `https://maps.google.com/?q=${coords.lat},${coords.lng}`;
@@ -875,6 +910,7 @@ async function saveSchedule(e) {
             }
         }
     }
+    closeScheduleModal();
     
     const payload = {
         provider_id: PROVIDER_ID,
@@ -1073,6 +1109,60 @@ function setupClientEventListeners() {
     
     document.getElementById('slider-prev').onclick = () => { document.getElementById('days-nav-container').scrollLeft -= 150; };
     document.getElementById('slider-next').onclick = () => { document.getElementById('days-nav-container').scrollLeft += 150; };
+
+    // --- Autocomplete de Endereço Manual (Nominatim) ---
+    let addressTimeout = null;
+    const addressInput = document.getElementById('field-address');
+    const suggestionsBox = document.getElementById('address-suggestions');
+    
+    if (addressInput && suggestionsBox) {
+        addressInput.addEventListener('input', () => {
+            // Limpa coordenadas pré-selecionadas ao digitar
+            document.getElementById('field-manual-lat').value = '';
+            document.getElementById('field-manual-lng').value = '';
+            
+            clearTimeout(addressTimeout);
+            const query = addressInput.value.trim();
+            if (query.length < 3) {
+                suggestionsBox.style.display = 'none';
+                return;
+            }
+            addressTimeout = setTimeout(async () => {
+                try {
+                    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=5&addressdetails=1&q=${encodeURIComponent(query)}`;
+                    const res = await fetch(url, { headers: { 'Accept-Language': 'pt-BR', 'User-Agent': 'GAVISP-Scheduler-App/1.0' } });
+                    const data = await res.json();
+                    if (data && data.length > 0) {
+                        suggestionsBox.innerHTML = '';
+                        data.forEach(item => {
+                            const div = document.createElement('div');
+                            div.className = 'address-suggestion-item';
+                            div.textContent = item.display_name;
+                            div.onclick = () => {
+                                addressInput.value = item.display_name;
+                                document.getElementById('field-manual-lat').value = item.lat;
+                                document.getElementById('field-manual-lng').value = item.lon;
+                                suggestionsBox.style.display = 'none';
+                            };
+                            suggestionsBox.appendChild(div);
+                        });
+                        suggestionsBox.style.display = 'block';
+                    } else {
+                        suggestionsBox.style.display = 'none';
+                    }
+                } catch(e) {
+                    console.error('Erro ao buscar sugestões:', e);
+                }
+            }, 500);
+        });
+
+        // Ocultar sugestões ao clicar fora
+        document.addEventListener('click', (e) => {
+            if (e.target !== addressInput && e.target !== suggestionsBox) {
+                suggestionsBox.style.display = 'none';
+            }
+        });
+    }
 }
 
 // --- Super Admin Control Panel Functions ---
@@ -1302,9 +1392,10 @@ function renderSettingsVehicles() {
     if (!state.vehicles) state.vehicles = [];
     state.vehicles.forEach((v, idx) => {
         const li = document.createElement('li');
+        const typeLabel = v.type === 'motorcycle' ? '🏍️ Moto' : '🚗 Carro';
         li.innerHTML = `
             <span class="settings-item-label">
-                <strong>${v.plate}</strong> — ${v.name}
+                <strong>${v.plate}</strong> (${typeLabel}) — ${v.name}
             </span>
             <button type="button" class="btn-card-action btn-delete" onclick="deleteVehicle(${idx})">
                 <i data-lucide="trash-2"></i>
@@ -1326,13 +1417,15 @@ window.deleteVehicle = deleteVehicle;
 function addVehicle() {
     const plateInput = document.getElementById('new-vehicle-plate');
     const nameInput = document.getElementById('new-vehicle-name');
+    const typeInput = document.getElementById('new-vehicle-type');
     if (!plateInput || !nameInput) return;
     const plate = plateInput.value.trim().toUpperCase();
     const name = nameInput.value.trim();
+    const type = typeInput ? typeInput.value : 'car';
     if (plate && name) {
         if (!state.vehicles) state.vehicles = [];
         if (!state.vehicles.some(v => v.plate === plate)) {
-            state.vehicles.push({ plate, name });
+            state.vehicles.push({ plate, name, type });
             plateInput.value = '';
             nameInput.value = '';
             renderSettingsVehicles();
