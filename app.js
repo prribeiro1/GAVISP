@@ -974,7 +974,22 @@ async function saveSchedule(e) {
     let mapLink = '';
     
     if (locType === 'link') {
-        mapLink = document.getElementById('field-map-link').value;
+        const rawLink = document.getElementById('field-map-link').value.trim();
+        if (rawLink) {
+            // Tentar extrair coordenadas exatas do link usando parseMapLink
+            if (window.parseMapLink) {
+                const parsed = window.parseMapLink(rawLink, 0);
+                if (parsed && !parsed.derived) {
+                    // Normalizar para link limpo com coordenadas exatas
+                    mapLink = `https://maps.google.com/?q=${parsed.lat},${parsed.lng}`;
+                } else {
+                    // Não conseguiu extrair coordenadas — salvar link original
+                    mapLink = rawLink;
+                }
+            } else {
+                mapLink = rawLink;
+            }
+        }
     } else {
         const address = document.getElementById('field-address').value;
         const manualLat = document.getElementById('field-manual-lat').value;
@@ -1204,7 +1219,7 @@ function setupClientEventListeners() {
     document.getElementById('slider-prev').onclick = () => { document.getElementById('days-nav-container').scrollLeft -= 150; };
     document.getElementById('slider-next').onclick = () => { document.getElementById('days-nav-container').scrollLeft += 150; };
 
-    // --- Autocomplete de Endereço Manual (Nominatim) ---
+    // --- Autocomplete de Endereço Manual (Nominatim - Otimizado para BR) ---
     let addressTimeout = null;
     const addressInput = document.getElementById('field-address');
     const suggestionsBox = document.getElementById('address-suggestions');
@@ -1221,21 +1236,66 @@ function setupClientEventListeners() {
                 suggestionsBox.style.display = 'none';
                 return;
             }
+            
+            // Mostrar indicador de busca
+            suggestionsBox.innerHTML = '<div class="address-suggestion-item" style="color:var(--text-secondary); font-style:italic; cursor:default;">🔍 Buscando endereços...</div>';
+            suggestionsBox.style.display = 'block';
+            
             addressTimeout = setTimeout(async () => {
                 try {
                     const lat = state.hqLat || -1.3780;
                     const lng = state.hqLng || -48.3720;
-                    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=5&addressdetails=1&lat=${lat}&lon=${lng}&q=${encodeURIComponent(query)}`;
-                    const res = await fetch(url, { headers: { 'Accept-Language': 'pt-BR', 'User-Agent': 'GAVISP-Scheduler-App/1.0' } });
+                    
+                    // Definir viewbox ao redor da sede (±0.5 grau ≈ ~55km)
+                    const viewbox = `${lng - 0.5},${lat + 0.5},${lng + 0.5},${lat - 0.5}`;
+                    
+                    // Buscar com viewbox para priorizar resultados próximos + limitar ao Brasil
+                    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=6&addressdetails=1&countrycodes=br&viewbox=${viewbox}&bounded=0&q=${encodeURIComponent(query)}`;
+                    const res = await fetch(url, { 
+                        headers: { 
+                            'Accept-Language': 'pt-BR',
+                            'User-Agent': 'GAVISP-Scheduler-App/1.0'
+                        }
+                    });
                     const data = await res.json();
+                    
+                    suggestionsBox.innerHTML = '';
+                    
                     if (data && data.length > 0) {
-                        suggestionsBox.innerHTML = '';
+                        // Ordenar por distância da sede
+                        data.sort((a, b) => {
+                            const distA = Math.abs(parseFloat(a.lat) - lat) + Math.abs(parseFloat(a.lon) - lng);
+                            const distB = Math.abs(parseFloat(b.lat) - lat) + Math.abs(parseFloat(b.lon) - lng);
+                            return distA - distB;
+                        });
+                        
                         data.forEach(item => {
                             const div = document.createElement('div');
                             div.className = 'address-suggestion-item';
-                            div.textContent = item.display_name;
+                            
+                            // Formatar nome mais legível
+                            const addr = item.address || {};
+                            let displayName = item.display_name;
+                            
+                            // Tentar montar endereço mais limpo
+                            const parts = [];
+                            if (addr.road) parts.push(addr.road);
+                            if (addr.house_number) parts[parts.length - 1] += ', ' + addr.house_number;
+                            if (addr.suburb || addr.neighbourhood) parts.push(addr.suburb || addr.neighbourhood);
+                            if (addr.city || addr.town || addr.village) parts.push(addr.city || addr.town || addr.village);
+                            if (addr.state) parts.push(addr.state);
+                            
+                            if (parts.length >= 2) {
+                                displayName = parts.join(' — ');
+                            }
+                            
+                            div.innerHTML = `
+                                <span style="font-weight:600; display:block; font-size:0.85rem;">${displayName}</span>
+                                <span style="font-size:0.7rem; color:var(--text-secondary); display:block; margin-top:2px;">📍 ${parseFloat(item.lat).toFixed(5)}, ${parseFloat(item.lon).toFixed(5)}</span>
+                            `;
+                            
                             div.onclick = () => {
-                                addressInput.value = item.display_name;
+                                addressInput.value = displayName;
                                 document.getElementById('field-manual-lat').value = item.lat;
                                 document.getElementById('field-manual-lng').value = item.lon;
                                 suggestionsBox.style.display = 'none';
@@ -1244,17 +1304,26 @@ function setupClientEventListeners() {
                         });
                         suggestionsBox.style.display = 'block';
                     } else {
-                        suggestionsBox.style.display = 'none';
+                        // Mostrar mensagem de "não encontrado" com dica
+                        suggestionsBox.innerHTML = `
+                            <div class="address-suggestion-item" style="color:var(--text-secondary); cursor:default; font-size:0.8rem;">
+                                <span style="display:block; font-weight:600;">😕 Nenhum resultado encontrado</span>
+                                <span style="display:block; margin-top:4px; font-size:0.75rem;">Dica: tente "Rua Nome, Cidade" ou "Av. Nome, Bairro, Cidade"</span>
+                            </div>
+                        `;
+                        suggestionsBox.style.display = 'block';
                     }
                 } catch(e) {
                     console.error('Erro ao buscar sugestões:', e);
+                    suggestionsBox.innerHTML = '<div class="address-suggestion-item" style="color:var(--status-red); cursor:default;">❌ Erro na busca. Tente novamente.</div>';
+                    suggestionsBox.style.display = 'block';
                 }
-            }, 500);
+            }, 350);
         });
 
         // Ocultar sugestões ao clicar fora
         document.addEventListener('click', (e) => {
-            if (e.target !== addressInput && e.target !== suggestionsBox) {
+            if (!addressInput.contains(e.target) && !suggestionsBox.contains(e.target)) {
                 suggestionsBox.style.display = 'none';
             }
         });

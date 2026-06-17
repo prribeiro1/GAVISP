@@ -49,30 +49,77 @@ function initMap() {
 }
 
 // Extract Lat/Lng from Google Maps link
-// Fallback to deterministic generation within Ananindeua if no coordinates exist in url
+// Priority: !3d/!4d (pin location) > ?q= (search target) > @lat,lng (viewport center) > direct coords
 function parseMapLink(link, saltIndex) {
     if (!link) return null;
     
-    // Match coordinates like @-1.3653158,-48.3846175 or q=-1.3653158,-48.3846175 or !3d-1.3653158!4d-48.3846175, or direct coordinates -1.3653158,-48.3846175
-    const regexAt = /@(-?\d+\.\d+),(-?\d+\.\d+)/;
-    const regexQ = /[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/;
-    const regexBang = /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/;
-    const regexDirect = /(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/;
+    const trimmed = link.trim();
     
-    let match = link.match(regexAt) || link.match(regexQ) || link.match(regexBang) || link.match(regexDirect);
-    
+    // 1. Try !3d / !4d first — this is the EXACT pin location in Google Maps data parameter
+    const regexBang = /!3d(-?\d+\.?\d*)!4d(-?\d+\.?\d*)/;
+    let match = trimmed.match(regexBang);
     if (match) {
-        return {
-            lat: parseFloat(match[1]),
-            lng: parseFloat(match[2]),
-            derived: false
-        };
+        const coords = validateCoords(parseFloat(match[1]), parseFloat(match[2]));
+        if (coords) return { ...coords, derived: false };
     }
     
-    // If it's a short link or address, generate deterministic coordinate to avoid CORS block on fetch
+    // 2. Try ?q=lat,lng or &q=lat,lng — explicit search/query target
+    const regexQ = /[?&]q=(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)/;
+    match = trimmed.match(regexQ);
+    if (match) {
+        const coords = validateCoords(parseFloat(match[1]), parseFloat(match[2]));
+        if (coords) return { ...coords, derived: false };
+    }
+    
+    // 3. Try /place/ URL with @lat,lng — Google Maps place view
+    const regexPlace = /\/place\/[^/]+\/@(-?\d+\.?\d*),(-?\d+\.?\d*)/;
+    match = trimmed.match(regexPlace);
+    if (match) {
+        const coords = validateCoords(parseFloat(match[1]), parseFloat(match[2]));
+        if (coords) return { ...coords, derived: false };
+    }
+    
+    // 4. Try @lat,lng — viewport center (less precise but common)
+    const regexAt = /@(-?\d+\.?\d*),(-?\d+\.?\d*)/;
+    match = trimmed.match(regexAt);
+    if (match) {
+        const coords = validateCoords(parseFloat(match[1]), parseFloat(match[2]));
+        if (coords) return { ...coords, derived: false };
+    }
+    
+    // 5. Try ll=lat,lng (alternative Google Maps parameter)
+    const regexLL = /[?&]ll=(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)/;
+    match = trimmed.match(regexLL);
+    if (match) {
+        const coords = validateCoords(parseFloat(match[1]), parseFloat(match[2]));
+        if (coords) return { ...coords, derived: false };
+    }
+    
+    // 6. Try direct coordinates pasted: "-1.3653, -48.3846" (only if it looks like just coordinates)
+    const regexDirect = /^\s*(-?\d+\.?\d*)\s*[,;\s]\s*(-?\d+\.?\d*)\s*$/;
+    match = trimmed.match(regexDirect);
+    if (match) {
+        const coords = validateCoords(parseFloat(match[1]), parseFloat(match[2]));
+        if (coords) return { ...coords, derived: false };
+    }
+    
+    // 7. Last resort: scan for any coordinate-like pair in the URL (but only valid lat/lng ranges)
+    const regexAny = /(-?\d{1,3}\.\d{3,})\s*,\s*(-?\d{1,3}\.\d{3,})/g;
+    let bestMatch = null;
+    let m;
+    while ((m = regexAny.exec(trimmed)) !== null) {
+        const coords = validateCoords(parseFloat(m[1]), parseFloat(m[2]));
+        if (coords) {
+            bestMatch = { ...coords, derived: false };
+            // Don't break - last valid match in URL is often the pin (in data= param)
+        }
+    }
+    if (bestMatch) return bestMatch;
+    
+    // If it's a short link (maps.app.goo.gl) or unresolvable, generate deterministic coordinate
     let hash = 0;
-    for (let i = 0; i < link.length; i++) {
-        hash = link.charCodeAt(i) + ((hash << 5) - hash);
+    for (let i = 0; i < trimmed.length; i++) {
+        hash = trimmed.charCodeAt(i) + ((hash << 5) - hash);
     }
     
     // Bounding Box centered around the custom HQ coordinate
@@ -84,7 +131,6 @@ function parseMapLink(link, saltIndex) {
     const latRange = latMax - latMin;
     const lngRange = lngMax - lngMin;
     
-    // Seed using saltIndex and hash
     const seed1 = Math.abs(hash + saltIndex * 77) % 1000 / 1000;
     const seed2 = Math.abs((hash >> 3) + saltIndex * 93) % 1000 / 1000;
     
@@ -97,6 +143,18 @@ function parseMapLink(link, saltIndex) {
         derived: true
     };
 }
+
+// Validate that coordinates are within valid lat/lng ranges
+function validateCoords(lat, lng) {
+    if (isNaN(lat) || isNaN(lng)) return null;
+    if (lat < -90 || lat > 90) return null;
+    if (lng < -180 || lng > 180) return null;
+    // Reject zero/zero (null island) as likely invalid
+    if (lat === 0 && lng === 0) return null;
+    return { lat, lng };
+}
+
+window.parseMapLink = parseMapLink;
 
 // Nearest Neighbor Algorithm for TSP
 function optimizeRouteSequence(points) {
