@@ -559,7 +559,7 @@ function renderSingleShift(shift, isReadOnly) {
     
     const vehiclesPresent = [...new Set(daySchedules.map(s => {
         let resolvedType = s.vehicle;
-        const mappedVehicle = state.vehicles.find(v => v.plate === s.vehicle);
+        const mappedVehicle = (state.vehicles || []).find(v => v && v.plate === s.vehicle);
         if (mappedVehicle) {
             resolvedType = mappedVehicle.type;
         }
@@ -582,7 +582,7 @@ function renderSingleShift(shift, isReadOnly) {
     const filteredSchedules = daySchedules.filter(s => {
         if (currentFilter === 'all') return true;
         let resolvedType = s.vehicle;
-        const mappedVehicle = state.vehicles.find(v => v.plate === s.vehicle);
+        const mappedVehicle = (state.vehicles || []).find(v => v && v.plate === s.vehicle);
         if (mappedVehicle) {
             resolvedType = mappedVehicle.type;
         }
@@ -639,7 +639,7 @@ function renderSingleShift(shift, isReadOnly) {
                 <div class="card-middle">
                     <span class="card-vehicle-icon">${(() => {
                         let resolvedType = sched.vehicle;
-                        const mappedVehicle = state.vehicles.find(v => v.plate === sched.vehicle);
+                        const mappedVehicle = (state.vehicles || []).find(v => v && v.plate === sched.vehicle);
                         if (mappedVehicle) {
                             resolvedType = mappedVehicle.type;
                         }
@@ -1559,7 +1559,7 @@ async function renderTechnicianDashboard() {
     // Atualizar subheader dinamicamente
     let subText = PROVIDER_DISPLAY_NAME;
     if (selectedTechPlate) {
-        const vInfo = state.vehicles.find(v => v.plate === selectedTechPlate);
+        const vInfo = (state.vehicles || []).find(v => v && v.plate === selectedTechPlate);
         if (vInfo) {
             subText += ` — ${vInfo.name} (${selectedTechPlate})`;
         } else {

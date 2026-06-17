@@ -202,7 +202,7 @@ function calculateAndRenderRoute(shift) {
     // For each vehicle group
     Object.keys(grouped).forEach((plate) => {
         const sList = grouped[plate];
-        const vInfo = state.vehicles.find(v => v.plate === plate);
+        const vInfo = (state.vehicles || []).find(v => v && v.plate === plate);
         const vName = vInfo ? `${plate} (${vInfo.name})` : (plate === 'sem-veiculo' ? 'Sem veículo' : plate);
         
         let locPoints = [];
