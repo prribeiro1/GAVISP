@@ -50,6 +50,37 @@ let shiftFilters = {
 // --- Super Admin State ---
 let adminSelectedProvider = '';
 
+// --- Global Error Handler (to help diagnose mobile issues) ---
+window.addEventListener('error', (event) => {
+    console.error('Erro não capturado:', event.error);
+    const msg = `Erro no script: ${event.message}\nLinha: ${event.lineno}\nArquivo: ${event.filename}`;
+    alert(msg);
+});
+window.addEventListener('unhandledrejection', (event) => {
+    console.error('Promise rejeitada não tratada:', event.reason);
+    alert('Erro de Promise: ' + (event.reason ? event.reason.message || event.reason : event));
+});
+
+function setLoginStatus(text, isError = false) {
+    const el = document.getElementById('login-status-msg');
+    if (!el) return;
+    if (text) {
+        el.textContent = text;
+        el.style.display = 'block';
+        if (isError) {
+            el.style.color = 'var(--status-red)';
+            el.style.backgroundColor = 'var(--status-red-bg)';
+            el.style.border = '1px solid #FFCDD2';
+        } else {
+            el.style.color = 'var(--primary)';
+            el.style.backgroundColor = 'var(--primary-light)';
+            el.style.border = '1px solid var(--border-color)';
+        }
+    } else {
+        el.style.display = 'none';
+    }
+}
+
 // --- Auth Observers ---
 let authInitialized = false;
 
@@ -59,10 +90,12 @@ function initAuthObserver() {
             if (session) {
                 await handleUserSession(session);
             } else {
+                setLoginStatus(null);
                 showView('view-login');
             }
         } catch (err) {
             console.error('Erro no listener de autenticação:', err);
+            setLoginStatus('Erro na sessão: ' + err.message, true);
             showView('view-login');
         }
     });
@@ -72,13 +105,17 @@ async function handleUserSession(session) {
     try {
         const email = session.user.email;
         const metadata = session.user.user_metadata || {};
+        setLoginStatus('Autenticado com sucesso. Identificando perfil...');
         
         if (metadata.role === 'super-admin' || email === 'admin@gavisp.com.br') {
             USER_ROLE = 'super-admin';
+            setLoginStatus('Carregando Painel Administrativo...');
             showView('view-super-admin');
             await initSuperAdmin();
+            setLoginStatus(null);
         } else if (metadata.role === 'technician' || metadata.role === 'tecnico' || email.startsWith('tecnico@') || email.startsWith('tecnico.')) {
             USER_ROLE = 'technician';
+            setLoginStatus('Identificado como Técnico. Buscando dados da empresa...');
             
             let detectedProviderId = metadata.provider_id || '';
             if (!detectedProviderId && (email.startsWith('tecnico.') || email.startsWith('tecnico@'))) {
@@ -93,6 +130,7 @@ async function handleUserSession(session) {
             PROVIDER_ID = detectedProviderId || 'linkfire';
             PROVIDER_DISPLAY_NAME = metadata.provider_name || (PROVIDER_ID.charAt(0).toUpperCase() + PROVIDER_ID.slice(1));
             
+            setLoginStatus('Verificando status do provedor no servidor...');
             // Verificar se o provedor está ativo
             try {
                 const { data: settingsData, error } = await _supabase
@@ -102,6 +140,7 @@ async function handleUserSession(session) {
                     .maybeSingle();
                     
                 if (!error && settingsData && settingsData.value && settingsData.value.active === false) {
+                    setLoginStatus('Acesso suspenso. Entre em contato com o suporte.', true);
                     showView('view-inactive');
                     return;
                 }
@@ -109,12 +148,15 @@ async function handleUserSession(session) {
                 console.error('Erro ao verificar status do provedor (técnico):', e);
             }
             
+            setLoginStatus('Iniciando Portal do Técnico...');
             showView('view-technician-dashboard');
             await initTechnicianDashboard(session.user);
+            setLoginStatus(null);
         } else {
             USER_ROLE = 'client';
             PROVIDER_ID = metadata.provider_id || 'linkfire';
             PROVIDER_DISPLAY_NAME = metadata.provider_name || 'LinkFire';
+            setLoginStatus('Identificado como Provedor. Carregando configurações...');
             
             // Verificar se o provedor está ativo
             try {
@@ -125,6 +167,7 @@ async function handleUserSession(session) {
                     .maybeSingle();
                     
                 if (!error && settingsData && settingsData.value && settingsData.value.active === false) {
+                    setLoginStatus('Acesso suspenso. Entre em contato com o suporte.', true);
                     showView('view-inactive');
                     return;
                 }
@@ -132,11 +175,15 @@ async function handleUserSession(session) {
                 console.error('Erro ao verificar status do provedor (cliente):', e);
             }
             
+            setLoginStatus('Iniciando Painel do Cliente...');
             showView('view-client-dashboard');
             await initClientDashboard();
+            setLoginStatus(null);
         }
     } catch (err) {
         console.error('Erro crítico no handleUserSession:', err);
+        setLoginStatus('Erro crítico de inicialização: ' + err.message, true);
+        alert('Erro crítico: ' + err.message);
         showView('view-login');
     }
 }
@@ -152,7 +199,6 @@ function showView(viewId) {
 }
 
 // --- App Initialization ---
-// Setup auth listeners immediately (DOM is ready since script is at bottom of body)
 function setupAuthEventListeners() {
     const formLogin = document.getElementById('form-login');
     if (formLogin) {
@@ -164,6 +210,7 @@ function setupAuthEventListeners() {
                 btn.disabled = true;
                 btn.textContent = 'Entrando...';
             }
+            setLoginStatus('Conectando ao banco de dados...');
             
             const email = document.getElementById('login-email').value;
             const password = document.getElementById('login-password').value;
@@ -171,9 +218,11 @@ function setupAuthEventListeners() {
             try {
                 const { error } = await _supabase.auth.signInWithPassword({ email, password });
                 if (error) {
+                    setLoginStatus('Falha no Login: ' + error.message, true);
                     alert('Falha no Login: ' + error.message);
                 }
             } catch (err) {
+                setLoginStatus('Erro de conexão: ' + err.message, true);
                 alert('Erro de conexão: ' + err.message);
             } finally {
                 if (btn) {
@@ -184,13 +233,14 @@ function setupAuthEventListeners() {
         });
     }
     
-    // Bind logout buttons using addEventListener (more robust than onclick)
     const logoutHandler = async () => {
         try {
+            setLoginStatus('Desconectando...');
             await _supabase.auth.signOut();
+            setLoginStatus(null);
         } catch (err) {
             console.error('Erro ao sair:', err);
-            // Force redirect to login on error
+            setLoginStatus(null);
             showView('view-login');
         }
     };
@@ -206,7 +256,6 @@ function setupAuthEventListeners() {
     if (btnBackLogin) btnBackLogin.addEventListener('click', logoutHandler);
 }
 
-// Run setup immediately since we're at the bottom of body - DOM is ready
 setupAuthEventListeners();
 initAuthObserver();
 
@@ -243,7 +292,11 @@ async function initClientDashboard() {
     } catch (err) {
         console.error("Erro geral na inicialização do dashboard:", err);
     }
-    lucide.createIcons();
+    try {
+        lucide.createIcons();
+    } catch (e) {
+        console.warn('Erro ao carregar ícones Lucide:', e);
+    }
 }
 
 function setupRealtimeSubscriptions() {
@@ -1724,7 +1777,11 @@ async function renderTechnicianDashboard() {
         document.getElementById('tech-summary-total').textContent = '0 visitas';
         document.getElementById('tech-summary-completed').textContent = '0 concluídas';
         document.getElementById('tech-km-value').textContent = '0.0 km';
-        lucide.createIcons();
+        try {
+            lucide.createIcons();
+        } catch (e) {
+            console.warn('Erro ao carregar ícones Lucide:', e);
+        }
         return;
     }
     
@@ -1757,7 +1814,11 @@ async function renderTechnicianDashboard() {
                 <p style="font-weight:600;">Parabéns! Nenhuma visita agendada para este veículo hoje.</p>
             </div>
         `;
-        lucide.createIcons();
+        try {
+            lucide.createIcons();
+        } catch (e) {
+            console.warn('Erro ao carregar ícones Lucide:', e);
+        }
         return;
     }
     
@@ -1797,7 +1858,7 @@ async function renderTechnicianDashboard() {
                     <i data-lucide="navigation" style="width:18px; height:18px;"></i>
                     Navegar
                 </a>
-                <a href="tel:${s.phone.replace(/\D/g, '')}" class="btn-tech-action">
+                <a href="tel:${(s.phone || '').replace(/\D/g, '')}" class="btn-tech-action">
                     <i data-lucide="phone" style="width:18px; height:18px;"></i>
                     Ligar
                 </a>
@@ -1810,7 +1871,11 @@ async function renderTechnicianDashboard() {
         listEl.appendChild(card);
     });
     
-    lucide.createIcons();
+    try {
+        lucide.createIcons();
+    } catch (e) {
+        console.warn('Erro ao carregar ícones Lucide:', e);
+    }
 }
 window.renderTechnicianDashboard = renderTechnicianDashboard;
 
