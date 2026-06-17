@@ -85,11 +85,70 @@ function setLoginStatus(text, isError = false) {
 let authInitialized = false;
 let isHandlingSession = false;
 
-function queryWithTimeout(promise, ms = 10000) {
+function queryWithTimeout(promise, ms = 15000) {
     return Promise.race([
         promise,
         new Promise((_, reject) => setTimeout(() => reject(new Error("Erro de conexão (Timeout do Servidor)")), ms))
     ]);
+}
+
+function getUserMetadata(user) {
+    return {
+        ...(user?.user_metadata || {}),
+        ...(user?.app_metadata || {})
+    };
+}
+
+function resolveProviderId(user) {
+    const metadata = getUserMetadata(user);
+    const email = (user?.email || '').toLowerCase();
+    let providerId = metadata.provider_id || metadata.providerId || metadata.provider || metadata.company_id || '';
+
+    if (!providerId && (email.startsWith('tecnico.') || email.startsWith('tecnico@'))) {
+        const prefix = email.split('@')[0];
+        if (prefix.startsWith('tecnico.')) {
+            const parts = prefix.split('.');
+            providerId = (parts[parts.length - 1] || '').split('+')[0];
+        }
+    }
+
+    return String(providerId || 'linkfire').trim().toLowerCase();
+}
+
+function getScheduleFromRow(item) {
+    return {
+        id: item.id,
+        dateStr: item.date_str,
+        shift: item.shift,
+        protocol: item.protocol,
+        vehicle: item.vehicle,
+        name: item.name,
+        phone: item.phone,
+        reason: item.reason,
+        status: item.status,
+        mapLink: item.map_link,
+        notes: item.notes
+    };
+}
+
+async function bootstrapExistingSession() {
+    try {
+        const { data, error } = await queryWithTimeout(_supabase.auth.getSession(), 8000);
+        if (error) {
+            console.error('Erro ao verificar sessao existente:', error);
+            return;
+        }
+
+        if (data && data.session && !authInitialized && !isHandlingSession) {
+            isHandlingSession = true;
+            authInitialized = true;
+            await handleUserSession(data.session);
+            isHandlingSession = false;
+        }
+    } catch (err) {
+        console.error('Nao foi possivel restaurar a sessao salva:', err);
+        isHandlingSession = false;
+    }
 }
 
 function initAuthObserver() {
@@ -131,7 +190,7 @@ function initAuthObserver() {
 async function handleUserSession(session) {
     try {
         const email = session.user.email;
-        const metadata = session.user.user_metadata || {};
+        const metadata = getUserMetadata(session.user);
         setLoginStatus('Autenticado com sucesso. Identificando perfil...');
         
         if (metadata.role === 'super-admin' || email === 'admin@gavisp.com.br') {
@@ -144,17 +203,7 @@ async function handleUserSession(session) {
             USER_ROLE = 'technician';
             setLoginStatus('Identificado como Técnico. Buscando dados da empresa...');
             
-            let detectedProviderId = metadata.provider_id || '';
-            if (!detectedProviderId && (email.startsWith('tecnico.') || email.startsWith('tecnico@'))) {
-                const prefix = email.split('@')[0];
-                if (prefix.startsWith('tecnico.')) {
-                    const parts = prefix.split('.');
-                    const lastPart = parts[parts.length - 1] || '';
-                    detectedProviderId = lastPart.split('+')[0] || '';
-                }
-            }
-            
-            PROVIDER_ID = detectedProviderId || 'linkfire';
+            PROVIDER_ID = resolveProviderId(session.user);
             PROVIDER_DISPLAY_NAME = metadata.provider_name || (PROVIDER_ID.charAt(0).toUpperCase() + PROVIDER_ID.slice(1));
             
             setLoginStatus('Verificando status do provedor no servidor...');
@@ -162,7 +211,7 @@ async function handleUserSession(session) {
             try {
                 const { data: settingsData, error } = await queryWithTimeout(
                     _supabase.from('settings').select('value').eq('provider_id', PROVIDER_ID).maybeSingle(),
-                    8000
+                    15000
                 );
                     
                 if (!error && settingsData && settingsData.value && settingsData.value.active === false) {
@@ -180,7 +229,7 @@ async function handleUserSession(session) {
             setLoginStatus(null);
         } else {
             USER_ROLE = 'client';
-            PROVIDER_ID = metadata.provider_id || 'linkfire';
+            PROVIDER_ID = resolveProviderId(session.user);
             PROVIDER_DISPLAY_NAME = metadata.provider_name || 'LinkFire';
             setLoginStatus('Identificado como Provedor. Carregando configurações...');
             
@@ -188,7 +237,7 @@ async function handleUserSession(session) {
             try {
                 const { data: settingsData, error } = await queryWithTimeout(
                     _supabase.from('settings').select('value').eq('provider_id', PROVIDER_ID).maybeSingle(),
-                    8000
+                    15000
                 );
                     
                 if (!error && settingsData && settingsData.value && settingsData.value.active === false) {
@@ -261,7 +310,7 @@ function setupAuthEventListeners() {
     const logoutHandler = async () => {
         try {
             setLoginStatus('Desconectando...');
-            await _supabase.auth.signOut();
+            await _supabase.auth.signOut({ scope: 'local' });
             setLoginStatus(null);
         } catch (err) {
             console.error('Erro ao sair:', err);
@@ -283,6 +332,7 @@ function setupAuthEventListeners() {
 
 setupAuthEventListeners();
 initAuthObserver();
+bootstrapExistingSession();
 
 // --- Client Dashboard Logic ---
 async function initClientDashboard() {
@@ -311,6 +361,8 @@ async function initClientDashboard() {
         } catch (err) {
             console.error("Erro ao carregar capacidades:", err);
         }
+
+        selectFirstScheduledVisibleDate();
         
         renderAll();
         setupRealtimeSubscriptions();
@@ -333,6 +385,7 @@ function setupRealtimeSubscriptions() {
         .channel('schema-db-changes')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'schedules', filter: `provider_id=eq.${PROVIDER_ID}` }, async () => {
             await loadSchedules();
+            selectFirstScheduledVisibleDate();
             renderAll();
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'capacities', filter: `provider_id=eq.${PROVIDER_ID}` }, async () => {
@@ -352,7 +405,7 @@ async function loadSettings() {
     try {
         const { data, error } = await queryWithTimeout(
             _supabase.from('settings').select('value').eq('provider_id', PROVIDER_ID).maybeSingle(),
-            8000
+            15000
         );
         
         if (error) {
@@ -403,7 +456,7 @@ async function loadSchedules() {
     try {
         const { data, error } = await queryWithTimeout(
             _supabase.from('schedules').select('*').eq('provider_id', PROVIDER_ID),
-            8000
+            15000
         );
         
         if (error) {
@@ -412,19 +465,7 @@ async function loadSchedules() {
         }
         
         if (data) {
-            state.schedules = data.map(item => ({
-                id: item.id,
-                dateStr: item.date_str,
-                shift: item.shift,
-                protocol: item.protocol,
-                vehicle: item.vehicle,
-                name: item.name,
-                phone: item.phone,
-                reason: item.reason,
-                status: item.status,
-                mapLink: item.map_link,
-                notes: item.notes
-            }));
+            state.schedules = data.map(getScheduleFromRow);
         }
     } catch (err) {
         console.error("Timeout ou erro ao carregar agendamentos:", err);
@@ -435,7 +476,7 @@ async function loadCapacities() {
     try {
         const { data, error } = await queryWithTimeout(
             _supabase.from('capacities').select('*').eq('provider_id', PROVIDER_ID),
-            8000
+            15000
         );
         
         if (error) {
@@ -619,6 +660,16 @@ function renderAll() {
     renderStats();
     renderDaysSlider();
     renderShifts();
+}
+
+function selectFirstScheduledVisibleDate() {
+    const activeDateHasSchedules = state.schedules.some(s => s.dateStr === activeDate);
+    if (activeDateHasSchedules) return;
+
+    const scheduledDate = daysList.find(day => state.schedules.some(s => s.dateStr === day.dateStr));
+    if (scheduledDate) {
+        activeDate = scheduledDate.dateStr;
+    }
 }
 
 function renderStats() {
@@ -850,12 +901,19 @@ async function adjustCapacity(shift, type) {
     state.capacities[capKey] = newVal;
     renderAll();
     
-    await _supabase.from('capacities').upsert({
+    const { error } = await _supabase.from('capacities').upsert({
         provider_id: PROVIDER_ID,
         date_str: activeDate,
         shift: shift,
         total_slots: newVal
     }, { onConflict: 'provider_id,date_str,shift' });
+
+    if (error) {
+        console.error('Erro ao salvar capacidade:', error);
+        alert('Nao foi possivel salvar a capacidade no banco: ' + error.message);
+        await loadCapacities();
+        renderAll();
+    }
 }
 
 async function quickChangeStatus(id, newStatus) {
@@ -863,7 +921,18 @@ async function quickChangeStatus(id, newStatus) {
     if (sched) {
         sched.status = newStatus;
         renderAll();
-        await _supabase.from('schedules').update({ status: newStatus }).eq('id', id);
+        const { error } = await _supabase
+            .from('schedules')
+            .update({ status: newStatus })
+            .eq('id', id)
+            .eq('provider_id', PROVIDER_ID);
+
+        if (error) {
+            console.error('Erro ao atualizar status:', error);
+            alert('Nao foi possivel atualizar o status no banco: ' + error.message);
+            await loadSchedules();
+            renderAll();
+        }
     }
 }
 
@@ -873,7 +942,18 @@ async function toggleComplete(id) {
         const nextStatus = sched.status === 'Realizado' ? 'Confirmado' : 'Realizado';
         sched.status = nextStatus;
         renderAll();
-        await _supabase.from('schedules').update({ status: nextStatus }).eq('id', id);
+        const { error } = await _supabase
+            .from('schedules')
+            .update({ status: nextStatus })
+            .eq('id', id)
+            .eq('provider_id', PROVIDER_ID);
+
+        if (error) {
+            console.error('Erro ao concluir/reabrir agendamento:', error);
+            alert('Nao foi possivel atualizar o agendamento no banco: ' + error.message);
+            await loadSchedules();
+            renderAll();
+        }
     }
 }
 
@@ -881,7 +961,18 @@ async function deleteSchedule(id) {
     if (confirm('Tem certeza que deseja excluir este agendamento?')) {
         state.schedules = state.schedules.filter(s => s.id !== id);
         renderAll();
-        await _supabase.from('schedules').delete().eq('id', id);
+        const { error } = await _supabase
+            .from('schedules')
+            .delete()
+            .eq('id', id)
+            .eq('provider_id', PROVIDER_ID);
+
+        if (error) {
+            console.error('Erro ao excluir agendamento:', error);
+            alert('Nao foi possivel excluir o agendamento no banco: ' + error.message);
+            await loadSchedules();
+            renderAll();
+        }
     }
 }
 
@@ -1111,21 +1202,41 @@ async function saveSchedule(e) {
         vehicle: vehicle
     };
     
-    if (id) {
-        const index = state.schedules.findIndex(s => s.id === id);
-        if (index !== -1) {
-            state.schedules[index] = { id, ...payload, dateStr };
-            renderAll();
+    try {
+        if (id) {
+            const { data, error } = await _supabase
+                .from('schedules')
+                .update(payload)
+                .eq('id', id)
+                .eq('provider_id', PROVIDER_ID)
+                .select()
+                .single();
+
+            if (error) throw error;
+
+            const index = state.schedules.findIndex(s => s.id === id);
+            if (index !== -1 && data) {
+                state.schedules[index] = getScheduleFromRow(data);
+            }
+        } else {
+            const { data, error } = await _supabase
+                .from('schedules')
+                .insert(payload)
+                .select()
+                .single();
+
+            if (error) throw error;
+            if (data) state.schedules.push(getScheduleFromRow(data));
         }
-        await _supabase.from('schedules').update(payload).eq('id', id);
-    } else {
-        const tempId = 'sched-' + Date.now();
-        state.schedules.push({ id: tempId, ...payload, dateStr });
+
+        await loadSchedules();
         renderAll();
-        await _supabase.from('schedules').insert(payload);
+    } catch (err) {
+        console.error('Erro ao salvar agendamento:', err);
+        alert('Nao foi possivel salvar o agendamento no banco: ' + (err.message || err));
+        await loadSchedules();
+        renderAll();
     }
-    await loadSchedules();
-    renderAll();
 }
 
 // --- Settings Modals ---
@@ -1222,7 +1333,12 @@ async function saveSettingsToDb() {
         hqLng: state.hqLng,
         vehicles: state.vehicles
     };
-    await _supabase.from('settings').upsert({ provider_id: PROVIDER_ID, value: payload }, { onConflict: 'provider_id' });
+    const { error } = await _supabase.from('settings').upsert({ provider_id: PROVIDER_ID, value: payload }, { onConflict: 'provider_id' });
+    if (error) {
+        console.error('Erro ao salvar configuracoes:', error);
+        alert('Nao foi possivel salvar as configuracoes no banco: ' + error.message);
+        throw error;
+    }
 }
 
 function setupClientEventListeners() {
@@ -1716,6 +1832,7 @@ let selectedTechPlate = localStorage.getItem('gavisp_tech_plate') || '';
 
 async function initTechnicianDashboard(user) {
     document.getElementById('tech-header-sub').textContent = PROVIDER_DISPLAY_NAME;
+    selectedTechPlate = localStorage.getItem(`gavisp_tech_plate_${PROVIDER_ID}`) || selectedTechPlate || '';
     
     // Fetch provider settings to get vehicles
     const { data: settingsData, error } = await _supabase
@@ -1765,6 +1882,7 @@ async function initTechnicianDashboard(user) {
         
         plateSelect.onchange = () => {
             selectedTechPlate = plateSelect.value;
+            localStorage.setItem(`gavisp_tech_plate_${PROVIDER_ID}`, selectedTechPlate);
             localStorage.setItem('gavisp_tech_plate', selectedTechPlate);
             renderTechnicianDashboard();
         };
@@ -1921,10 +2039,19 @@ async function toggleTechComplete(id) {
         const nextStatus = sched.status === 'Realizado' ? 'Confirmado' : 'Realizado';
         sched.status = nextStatus;
         renderTechnicianDashboard();
-        await _supabase.from('schedules').update({ status: nextStatus }).eq('id', id);
+        const { error } = await _supabase
+            .from('schedules')
+            .update({ status: nextStatus })
+            .eq('id', id)
+            .eq('provider_id', PROVIDER_ID);
+
+        if (error) {
+            console.error('Erro ao atualizar visita do tecnico:', error);
+            alert('Nao foi possivel atualizar a visita no banco: ' + error.message);
+        }
+
         await loadSchedules();
         renderTechnicianDashboard();
     }
 }
 window.toggleTechComplete = toggleTechComplete;
-
