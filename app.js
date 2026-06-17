@@ -51,71 +51,93 @@ let shiftFilters = {
 let adminSelectedProvider = '';
 
 // --- Auth Observers ---
-_supabase.auth.onAuthStateChange(async (event, session) => {
-    if (session) {
-        await handleUserSession(session);
-    } else {
-        showView('view-login');
-    }
-});
+let authInitialized = false;
+
+function initAuthObserver() {
+    _supabase.auth.onAuthStateChange(async (event, session) => {
+        try {
+            if (session) {
+                await handleUserSession(session);
+            } else {
+                showView('view-login');
+            }
+        } catch (err) {
+            console.error('Erro no listener de autenticação:', err);
+            showView('view-login');
+        }
+    });
+}
 
 async function handleUserSession(session) {
-    const email = session.user.email;
-    const metadata = session.user.user_metadata || {};
-    
-    if (metadata.role === 'super-admin' || email === 'admin@gavisp.com.br') {
-        USER_ROLE = 'super-admin';
-        showView('view-super-admin');
-        initSuperAdmin();
-    } else if (metadata.role === 'technician' || metadata.role === 'tecnico' || email.startsWith('tecnico@') || email.startsWith('tecnico.')) {
-        USER_ROLE = 'technician';
+    try {
+        const email = session.user.email;
+        const metadata = session.user.user_metadata || {};
         
-        let detectedProviderId = metadata.provider_id || '';
-        if (!detectedProviderId && (email.startsWith('tecnico.') || email.startsWith('tecnico@'))) {
-            const prefix = email.split('@')[0];
-            if (prefix.startsWith('tecnico.')) {
-                const parts = prefix.split('.');
-                const lastPart = parts[parts.length - 1] || '';
-                detectedProviderId = lastPart.split('+')[0] || '';
+        if (metadata.role === 'super-admin' || email === 'admin@gavisp.com.br') {
+            USER_ROLE = 'super-admin';
+            showView('view-super-admin');
+            await initSuperAdmin();
+        } else if (metadata.role === 'technician' || metadata.role === 'tecnico' || email.startsWith('tecnico@') || email.startsWith('tecnico.')) {
+            USER_ROLE = 'technician';
+            
+            let detectedProviderId = metadata.provider_id || '';
+            if (!detectedProviderId && (email.startsWith('tecnico.') || email.startsWith('tecnico@'))) {
+                const prefix = email.split('@')[0];
+                if (prefix.startsWith('tecnico.')) {
+                    const parts = prefix.split('.');
+                    const lastPart = parts[parts.length - 1] || '';
+                    detectedProviderId = lastPart.split('+')[0] || '';
+                }
             }
-        }
-        
-        PROVIDER_ID = detectedProviderId || 'linkfire';
-        PROVIDER_DISPLAY_NAME = metadata.provider_name || (PROVIDER_ID.charAt(0).toUpperCase() + PROVIDER_ID.slice(1));
-        
-        // Verificar se o provedor está ativo
-        const { data: settingsData, error } = await _supabase
-            .from('settings')
-            .select('value')
-            .eq('provider_id', PROVIDER_ID)
-            .maybeSingle();
             
-        if (!error && settingsData && settingsData.value && settingsData.value.active === false) {
-            showView('view-inactive');
-            return;
-        }
-        
-        showView('view-technician-dashboard');
-        initTechnicianDashboard(session.user);
-    } else {
-        USER_ROLE = 'client';
-        PROVIDER_ID = metadata.provider_id || 'linkfire';
-        PROVIDER_DISPLAY_NAME = metadata.provider_name || 'LinkFire';
-        
-        // Verificar se o provedor está ativo
-        const { data: settingsData, error } = await _supabase
-            .from('settings')
-            .select('value')
-            .eq('provider_id', PROVIDER_ID)
-            .maybeSingle();
+            PROVIDER_ID = detectedProviderId || 'linkfire';
+            PROVIDER_DISPLAY_NAME = metadata.provider_name || (PROVIDER_ID.charAt(0).toUpperCase() + PROVIDER_ID.slice(1));
             
-        if (!error && settingsData && settingsData.value && settingsData.value.active === false) {
-            showView('view-inactive');
-            return;
+            // Verificar se o provedor está ativo
+            try {
+                const { data: settingsData, error } = await _supabase
+                    .from('settings')
+                    .select('value')
+                    .eq('provider_id', PROVIDER_ID)
+                    .maybeSingle();
+                    
+                if (!error && settingsData && settingsData.value && settingsData.value.active === false) {
+                    showView('view-inactive');
+                    return;
+                }
+            } catch (e) {
+                console.error('Erro ao verificar status do provedor (técnico):', e);
+            }
+            
+            showView('view-technician-dashboard');
+            await initTechnicianDashboard(session.user);
+        } else {
+            USER_ROLE = 'client';
+            PROVIDER_ID = metadata.provider_id || 'linkfire';
+            PROVIDER_DISPLAY_NAME = metadata.provider_name || 'LinkFire';
+            
+            // Verificar se o provedor está ativo
+            try {
+                const { data: settingsData, error } = await _supabase
+                    .from('settings')
+                    .select('value')
+                    .eq('provider_id', PROVIDER_ID)
+                    .maybeSingle();
+                    
+                if (!error && settingsData && settingsData.value && settingsData.value.active === false) {
+                    showView('view-inactive');
+                    return;
+                }
+            } catch (e) {
+                console.error('Erro ao verificar status do provedor (cliente):', e);
+            }
+            
+            showView('view-client-dashboard');
+            await initClientDashboard();
         }
-        
-        showView('view-client-dashboard');
-        initClientDashboard();
+    } catch (err) {
+        console.error('Erro crítico no handleUserSession:', err);
+        showView('view-login');
     }
 }
 
@@ -130,27 +152,63 @@ function showView(viewId) {
 }
 
 // --- App Initialization ---
-window.onload = () => {
-    setupAuthEventListeners();
-};
-
+// Setup auth listeners immediately (DOM is ready since script is at bottom of body)
 function setupAuthEventListeners() {
-    document.getElementById('form-login').onsubmit = async (e) => {
-        e.preventDefault();
-        const email = document.getElementById('login-email').value;
-        const password = document.getElementById('login-password').value;
-        
-        const { error } = await _supabase.auth.signInWithPassword({ email, password });
-        if (error) {
-            alert('Falha no Login: ' + error.message);
+    const formLogin = document.getElementById('form-login');
+    if (formLogin) {
+        formLogin.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('btn-login-submit');
+            const originalText = btn ? btn.textContent : '';
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = 'Entrando...';
+            }
+            
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
+            
+            try {
+                const { error } = await _supabase.auth.signInWithPassword({ email, password });
+                if (error) {
+                    alert('Falha no Login: ' + error.message);
+                }
+            } catch (err) {
+                alert('Erro de conexão: ' + err.message);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = originalText;
+                }
+            }
+        });
+    }
+    
+    // Bind logout buttons using addEventListener (more robust than onclick)
+    const logoutHandler = async () => {
+        try {
+            await _supabase.auth.signOut();
+        } catch (err) {
+            console.error('Erro ao sair:', err);
+            // Force redirect to login on error
+            showView('view-login');
         }
     };
     
-    document.getElementById('btn-logout-client').onclick = () => _supabase.auth.signOut();
-    document.getElementById('btn-logout-admin').onclick = () => _supabase.auth.signOut();
-    document.getElementById('btn-logout-tech').onclick = () => _supabase.auth.signOut();
-    document.getElementById('btn-back-login').onclick = () => _supabase.auth.signOut();
+    const btnLogoutClient = document.getElementById('btn-logout-client');
+    const btnLogoutAdmin = document.getElementById('btn-logout-admin');
+    const btnLogoutTech = document.getElementById('btn-logout-tech');
+    const btnBackLogin = document.getElementById('btn-back-login');
+    
+    if (btnLogoutClient) btnLogoutClient.addEventListener('click', logoutHandler);
+    if (btnLogoutAdmin) btnLogoutAdmin.addEventListener('click', logoutHandler);
+    if (btnLogoutTech) btnLogoutTech.addEventListener('click', logoutHandler);
+    if (btnBackLogin) btnBackLogin.addEventListener('click', logoutHandler);
 }
+
+// Run setup immediately since we're at the bottom of body - DOM is ready
+setupAuthEventListeners();
+initAuthObserver();
 
 // --- Client Dashboard Logic ---
 async function initClientDashboard() {
@@ -1206,48 +1264,67 @@ function setupClientEventListeners() {
 // --- Super Admin Control Panel Functions ---
 
 async function initSuperAdmin() {
-    const { data: providersList, error } = await _supabase
-        .from('settings')
-        .select('provider_id, value');
+    try {
+        const { data: providersList, error } = await _supabase
+            .from('settings')
+            .select('provider_id, value');
+            
+        if (error) {
+            console.error('Erro ao buscar provedores para Super-Admin:', error);
+            const listContainer = document.getElementById('admin-provider-list');
+            if (listContainer) listContainer.innerHTML = '<div style="padding:20px; text-align:center; color:var(--status-red);">Erro ao carregar dados: ' + error.message + '</div>';
+            return;
+        }
         
-    if (error || !providersList) {
-        console.error('Erro ao buscar provedores para Super-Admin:', error);
-        return;
-    }
-    
-    const { data: scheds, error: scErr } = await _supabase.from('schedules').select('id');
-    const totalSchedules = scErr ? 0 : (scheds ? scheds.length : 0);
-    
-    document.getElementById('admin-stat-clients').textContent = providersList.length;
-    document.getElementById('admin-stat-schedules').textContent = totalSchedules;
-    
-    const listContainer = document.getElementById('admin-provider-list');
-    listContainer.innerHTML = '';
-    
-    providersList.forEach(p => {
-        const item = document.createElement('div');
-        item.className = 'provider-item';
-        const name = (p.value && p.value.hqName) || p.provider_id;
-        const isActive = p.value && p.value.active !== false;
+        const providers = providersList || [];
         
-        item.innerHTML = `
-            <div>
-                <h5>${name}</h5>
-                <span class="sub">${p.provider_id}</span>
-            </div>
-            <span class="badge-active-status ${isActive ? 'active' : 'inactive'}">${isActive ? 'Ativo' : 'Inativo'}</span>
-        `;
+        let totalSchedules = 0;
+        try {
+            const { data: scheds, error: scErr } = await _supabase.from('schedules').select('id');
+            totalSchedules = scErr ? 0 : (scheds ? scheds.length : 0);
+        } catch (e) {
+            console.error('Erro ao contar agendamentos:', e);
+        }
         
-        item.onclick = () => {
-            document.querySelectorAll('.provider-item').forEach(el => el.classList.remove('active'));
-            item.classList.add('active');
-            selectAdminProvider(p.provider_id, name, isActive, p.value);
-        };
+        document.getElementById('admin-stat-clients').textContent = providers.length;
+        document.getElementById('admin-stat-schedules').textContent = totalSchedules;
         
-        listContainer.appendChild(item);
-    });
+        const listContainer = document.getElementById('admin-provider-list');
+        listContainer.innerHTML = '';
+        
+        if (providers.length === 0) {
+            listContainer.innerHTML = '<div style="padding:20px; text-align:center; color:var(--text-secondary); font-style:italic;">Nenhuma empresa cadastrada ainda.</div>';
+        } else {
+            providers.forEach(p => {
+                const item = document.createElement('div');
+                item.className = 'provider-item';
+                const name = (p.value && p.value.hqName) || p.provider_id;
+                const isActive = p.value && p.value.active !== false;
+                
+                item.innerHTML = `
+                    <div>
+                        <h5>${name}</h5>
+                        <span class="sub">${p.provider_id}</span>
+                    </div>
+                    <span class="badge-active-status ${isActive ? 'active' : 'inactive'}">${isActive ? 'Ativo' : 'Inativo'}</span>
+                `;
+                
+                item.onclick = () => {
+                    document.querySelectorAll('.provider-item').forEach(el => el.classList.remove('active'));
+                    item.classList.add('active');
+                    selectAdminProvider(p.provider_id, name, isActive, p.value);
+                };
+                
+                listContainer.appendChild(item);
+            });
+        }
 
-    lucide.createIcons();
+        try { lucide.createIcons(); } catch(e) { console.warn('Lucide icons:', e); }
+    } catch (err) {
+        console.error('Erro crítico no initSuperAdmin:', err);
+        const listContainer = document.getElementById('admin-provider-list');
+        if (listContainer) listContainer.innerHTML = '<div style="padding:20px; text-align:center; color:var(--status-red);">Erro ao carregar painel: ' + err.message + '</div>';
+    }
 }
 
 async function selectAdminProvider(providerId, providerName, isActive, val) {
