@@ -53,12 +53,13 @@ function initMap() {
 function parseMapLink(link, saltIndex) {
     if (!link) return null;
     
-    // Match coordinates like @-1.3653158,-48.3846175 or q=-1.3653158,-48.3846175 or !3d-1.3653158!4d-48.3846175
+    // Match coordinates like @-1.3653158,-48.3846175 or q=-1.3653158,-48.3846175 or !3d-1.3653158!4d-48.3846175, or direct coordinates -1.3653158,-48.3846175
     const regexAt = /@(-?\d+\.\d+),(-?\d+\.\d+)/;
     const regexQ = /[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/;
     const regexBang = /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/;
+    const regexDirect = /(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/;
     
-    let match = link.match(regexAt) || link.match(regexQ) || link.match(regexBang);
+    let match = link.match(regexAt) || link.match(regexQ) || link.match(regexBang) || link.match(regexDirect);
     
     if (match) {
         return {

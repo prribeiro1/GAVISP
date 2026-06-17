@@ -395,8 +395,11 @@
 
                     <div class="form-group" id="loc-link-group">
                         <label for="field-map-link">Link do Google Maps da Localização</label>
-                        <input type="url" id="field-map-link" placeholder="Cole o link do Maps aqui (Ex: https://maps.app.goo.gl/...)">
+                        <input type="url" id="field-map-link" placeholder="Cole o link completo do Maps ou Lat,Lng (Ex: https://maps.google.com/maps?q=...)">
                         <span class="field-help">Essencial para gerar a rota otimizada no turno.</span>
+                        <div id="short-link-warning" style="display: none; color: var(--status-red); font-size: 0.8rem; font-weight: 700; margin-top: 6px; background: var(--status-red-bg); padding: 8px; border-radius: var(--border-radius-md); border: 1px solid #FFCDD2;">
+                            ⚠️ Links curtos de celular (ex: maps.app.goo.gl) não enviam coordenadas direto no navegador. Prefira usar a aba "Endereço Manual" com busca ou cole as coordenadas Latitude,Longitude diretas (ex: -1.35,-48.38).
+                        </div>
                     </div>
 
                     <div class="form-group" id="loc-address-group" style="display: none; position: relative;">

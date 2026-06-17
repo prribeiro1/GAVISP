@@ -767,6 +767,8 @@ function openAddModal(shift) {
     document.getElementById('field-shift').value = shift;
     document.getElementById('field-manual-lat').value = '';
     document.getElementById('field-manual-lng').value = '';
+    const warningDiv = document.getElementById('short-link-warning');
+    if (warningDiv) warningDiv.style.display = 'none';
     
     const num = Math.floor(100000 + Math.random() * 900000);
     document.getElementById('field-protocol').value = `LF-${num}`;
@@ -811,6 +813,16 @@ function openEditModal(id) {
         document.getElementById('field-address').value = '';
     }
     toggleLocFields();
+
+    const warningDiv = document.getElementById('short-link-warning');
+    if (warningDiv) {
+        const val = (sched.mapLink || '').toLowerCase();
+        if (val.includes('maps.app.goo.gl') || val.includes('goo.gl/maps')) {
+            warningDiv.style.display = 'block';
+        } else {
+            warningDiv.style.display = 'none';
+        }
+    }
     
     const radios = document.getElementsByName('vehicle');
     radios.forEach(r => { r.checked = r.value === sched.vehicle; });
@@ -1099,6 +1111,19 @@ function setupClientEventListeners() {
     document.getElementById('loc-type-link').onchange = toggleLocFields;
     document.getElementById('loc-type-address').onchange = toggleLocFields;
     
+    const mapLinkInput = document.getElementById('field-map-link');
+    const warningDiv = document.getElementById('short-link-warning');
+    if (mapLinkInput && warningDiv) {
+        mapLinkInput.addEventListener('input', () => {
+            const val = mapLinkInput.value.trim().toLowerCase();
+            if (val.includes('maps.app.goo.gl') || val.includes('goo.gl/maps')) {
+                warningDiv.style.display = 'block';
+            } else {
+                warningDiv.style.display = 'none';
+            }
+        });
+    }
+    
     document.getElementById('btn-hq-current-location').onclick = () => {
         if (!navigator.geolocation) {
             alert('Geolocalização não suportada no seu navegador.');
@@ -1140,7 +1165,9 @@ function setupClientEventListeners() {
             }
             addressTimeout = setTimeout(async () => {
                 try {
-                    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=5&addressdetails=1&q=${encodeURIComponent(query)}`;
+                    const lat = state.hqLat || -1.3780;
+                    const lng = state.hqLng || -48.3720;
+                    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=5&addressdetails=1&lat=${lat}&lon=${lng}&q=${encodeURIComponent(query)}`;
                     const res = await fetch(url, { headers: { 'Accept-Language': 'pt-BR', 'User-Agent': 'GAVISP-Scheduler-App/1.0' } });
                     const data = await res.json();
                     if (data && data.length > 0) {
@@ -1479,9 +1506,12 @@ async function initTechnicianDashboard(user) {
             selectedTechPlate = userPlate.toUpperCase();
         } else {
             const userName = user.user_metadata?.name || user.user_metadata?.full_name || '';
-            const matchingVehicle = state.vehicles.find(v => v.name.toLowerCase() === userName.toLowerCase());
-            if (matchingVehicle) {
-                selectedTechPlate = matchingVehicle.plate;
+            if (userName) {
+                const vehiclesList = state.vehicles || [];
+                const matchingVehicle = vehiclesList.find(v => v && v.name && v.name.toLowerCase() === userName.toLowerCase());
+                if (matchingVehicle) {
+                    selectedTechPlate = matchingVehicle.plate;
+                }
             }
         }
     }
