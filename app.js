@@ -83,13 +83,39 @@ function setLoginStatus(text, isError = false) {
 
 // --- Auth Observers ---
 let authInitialized = false;
+let isHandlingSession = false;
+
+function queryWithTimeout(promise, ms = 10000) {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Erro de conexão (Timeout do Servidor)")), ms))
+    ]);
+}
 
 function initAuthObserver() {
     _supabase.auth.onAuthStateChange(async (event, session) => {
         try {
+            console.log("Evento Auth:", event, "Sessão ativa:", !!session);
             if (session) {
+                // Se já estiver inicializado e for apenas atualização de token, ignora para evitar loops
+                if (authInitialized && (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED')) {
+                    console.log("Ignorando re-inicialização no refresh de token.");
+                    return;
+                }
+                
+                // Evita execuções concorrentes do processo de login/inicialização
+                if (isHandlingSession) {
+                    console.warn("handleUserSession já em andamento. Ignorando chamada concorrente.");
+                    return;
+                }
+                
+                isHandlingSession = true;
+                authInitialized = true;
                 await handleUserSession(session);
+                isHandlingSession = false;
             } else {
+                authInitialized = false;
+                isHandlingSession = false;
                 setLoginStatus(null);
                 showView('view-login');
             }
@@ -97,6 +123,7 @@ function initAuthObserver() {
             console.error('Erro no listener de autenticação:', err);
             setLoginStatus('Erro na sessão: ' + err.message, true);
             showView('view-login');
+            isHandlingSession = false;
         }
     });
 }
@@ -133,11 +160,10 @@ async function handleUserSession(session) {
             setLoginStatus('Verificando status do provedor no servidor...');
             // Verificar se o provedor está ativo
             try {
-                const { data: settingsData, error } = await _supabase
-                    .from('settings')
-                    .select('value')
-                    .eq('provider_id', PROVIDER_ID)
-                    .maybeSingle();
+                const { data: settingsData, error } = await queryWithTimeout(
+                    _supabase.from('settings').select('value').eq('provider_id', PROVIDER_ID).maybeSingle(),
+                    8000
+                );
                     
                 if (!error && settingsData && settingsData.value && settingsData.value.active === false) {
                     setLoginStatus('Acesso suspenso. Entre em contato com o suporte.', true);
@@ -160,11 +186,10 @@ async function handleUserSession(session) {
             
             // Verificar se o provedor está ativo
             try {
-                const { data: settingsData, error } = await _supabase
-                    .from('settings')
-                    .select('value')
-                    .eq('provider_id', PROVIDER_ID)
-                    .maybeSingle();
+                const { data: settingsData, error } = await queryWithTimeout(
+                    _supabase.from('settings').select('value').eq('provider_id', PROVIDER_ID).maybeSingle(),
+                    8000
+                );
                     
                 if (!error && settingsData && settingsData.value && settingsData.value.active === false) {
                     setLoginStatus('Acesso suspenso. Entre em contato com o suporte.', true);
@@ -324,37 +349,40 @@ function setupRealtimeSubscriptions() {
 // --- Supabase Client Loaders ---
 
 async function loadSettings() {
-    const { data, error } = await _supabase
-        .from('settings')
-        .select('value')
-        .eq('provider_id', PROVIDER_ID)
-        .maybeSingle();
+    try {
+        const { data, error } = await queryWithTimeout(
+            _supabase.from('settings').select('value').eq('provider_id', PROVIDER_ID).maybeSingle(),
+            8000
+        );
         
-    if (error) {
-        console.error('Erro ao buscar configurações no Supabase:', error);
-        return;
-    }
-    
-    if (data && data.value) {
-        state.reasons = data.value.reasons || state.reasons;
-        state.statuses = data.value.statuses || state.statuses;
-        state.defaultMorning = data.value.defaultMorning || state.defaultMorning;
-        state.defaultAfternoon = data.value.defaultAfternoon || state.defaultAfternoon;
-        state.retentionDays = data.value.retentionDays || 0;
-        state.hqName = data.value.hqName || '';
-        state.hqLat = data.value.hqLat || state.hqLat;
-        state.hqLng = data.value.hqLng || state.hqLng;
-        state.vehicles = data.value.vehicles || [];
-        
-        renderHeaderLogo();
-        
-        if (window.updateHQ) {
-            window.updateHQ(state.hqLat, state.hqLng, state.hqName || PROVIDER_DISPLAY_NAME);
+        if (error) {
+            console.error('Erro ao buscar configurações no Supabase:', error);
+            return;
         }
         
-        runDataRetention();
-    } else {
-        await saveSettingsToDb();
+        if (data && data.value) {
+            state.reasons = data.value.reasons || state.reasons;
+            state.statuses = data.value.statuses || state.statuses;
+            state.defaultMorning = data.value.defaultMorning || state.defaultMorning;
+            state.defaultAfternoon = data.value.defaultAfternoon || state.defaultAfternoon;
+            state.retentionDays = data.value.retentionDays || 0;
+            state.hqName = data.value.hqName || '';
+            state.hqLat = data.value.hqLat || state.hqLat;
+            state.hqLng = data.value.hqLng || state.hqLng;
+            state.vehicles = data.value.vehicles || [];
+            
+            renderHeaderLogo();
+            
+            if (window.updateHQ) {
+                window.updateHQ(state.hqLat, state.hqLng, state.hqName || PROVIDER_DISPLAY_NAME);
+            }
+            
+            runDataRetention();
+        } else {
+            await saveSettingsToDb();
+        }
+    } catch (err) {
+        console.error("Timeout ou erro ao carregar configurações:", err);
     }
 }
 
@@ -372,49 +400,57 @@ function renderHeaderLogo() {
 }
 
 async function loadSchedules() {
-    const { data, error } = await _supabase
-        .from('schedules')
-        .select('*')
-        .eq('provider_id', PROVIDER_ID);
+    try {
+        const { data, error } = await queryWithTimeout(
+            _supabase.from('schedules').select('*').eq('provider_id', PROVIDER_ID),
+            8000
+        );
         
-    if (error) {
-        console.error('Erro ao carregar agendamentos do Supabase:', error);
-        return;
-    }
-    
-    if (data) {
-        state.schedules = data.map(item => ({
-            id: item.id,
-            dateStr: item.date_str,
-            shift: item.shift,
-            protocol: item.protocol,
-            vehicle: item.vehicle,
-            name: item.name,
-            phone: item.phone,
-            reason: item.reason,
-            status: item.status,
-            mapLink: item.map_link,
-            notes: item.notes
-        }));
+        if (error) {
+            console.error('Erro ao carregar agendamentos do Supabase:', error);
+            return;
+        }
+        
+        if (data) {
+            state.schedules = data.map(item => ({
+                id: item.id,
+                dateStr: item.date_str,
+                shift: item.shift,
+                protocol: item.protocol,
+                vehicle: item.vehicle,
+                name: item.name,
+                phone: item.phone,
+                reason: item.reason,
+                status: item.status,
+                mapLink: item.map_link,
+                notes: item.notes
+            }));
+        }
+    } catch (err) {
+        console.error("Timeout ou erro ao carregar agendamentos:", err);
     }
 }
 
 async function loadCapacities() {
-    const { data, error } = await _supabase
-        .from('capacities')
-        .select('*')
-        .eq('provider_id', PROVIDER_ID);
+    try {
+        const { data, error } = await queryWithTimeout(
+            _supabase.from('capacities').select('*').eq('provider_id', PROVIDER_ID),
+            8000
+        );
         
-    if (error) {
-        console.error('Erro ao carregar capacidades do Supabase:', error);
-        return;
-    }
-    
-    if (data) {
-        state.capacities = {};
-        data.forEach(item => {
-            state.capacities[`${item.date_str}_${item.shift}`] = item.total_slots;
-        });
+        if (error) {
+            console.error('Erro ao carregar capacidades do Supabase:', error);
+            return;
+        }
+        
+        if (data) {
+            state.capacities = {};
+            data.forEach(item => {
+                state.capacities[`${item.date_str}_${item.shift}`] = item.total_slots;
+            });
+        }
+    } catch (err) {
+        console.error("Timeout ou erro ao carregar capacidades:", err);
     }
 }
 
